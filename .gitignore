@@ -1,0 +1,55 @@
+# ==========================================================================
+#  .gitignore
+#  ------------------------------------------------------------------------
+#  这个项目里有大量**真实运行数据**，一律不进版本库。
+#
+#  最要紧的是 data/ —— 里面有 history.sqlite3，是真实的群聊天记录，
+#  含群友昵称、消息原文、时间戳。这是别人的聊天内容，绝不该推到公开仓库。
+#  同样道理还有 agent_audit.jsonl（谁让机器人干了什么）、ui.log、
+#  threads.json、以及截图。
+#
+#  config.yaml 也不进：里面有口令、授权名单（微信号）、白名单群名。
+#  仓库里放 config.example.yaml，首次运行时 start.cmd 会从它复制一份。
+# ==========================================================================
+
+# ---- 运行数据：最要紧的一条 ----
+data/
+wxauto_logs/
+
+# ---- 真实配置：含口令 / 微信号 / 群名 ----
+config.yaml
+persona.yaml.local
+memes_user.yaml
+
+# ---- 运行时产物 ----
+*.log
+logs/
+*.pid
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.jsonl
+
+# ---- Python ----
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 界面构建产物 ----
+ui/*.obj
+ui/*.exe
+ui/*.ilk
+ui/*.pdb
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/

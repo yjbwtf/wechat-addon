@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>微信群助手 · 设置</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="nav">
+    <div class="brand">
+      <div class="brand-title">微信群助手</div>
+      <div class="brand-sub" id="brandSub">蓝色大肥鱼 · 控制台</div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="nav-foot">
+      <button class="ghost" id="themeBtn" title="切换明暗">◐ 主题</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h1 id="pageTitle">状态</h1>
+      <div class="top-right">
+        <span class="pill" id="statusPill">读取中…</span>
+        <button class="btn" id="btnReload">重新读取</button>
+        <button class="btn" id="btnRevert" disabled>放弃修改</button>
+        <button class="btn primary" id="btnSave" disabled>保存配置</button>
+      </div>
+    </header>
+    <div class="dirty-bar" id="dirtyBar" hidden>● 有未保存的改动</div>
+    <section class="content" id="content"></section>
+  </main>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-card">
+    <h3 id="modalTitle">确认</h3>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button class="btn" id="modalNo">取消</button>
+      <button class="btn primary" id="modalYes">确定</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

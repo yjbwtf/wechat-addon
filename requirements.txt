@@ -1,0 +1,8 @@
+PyYAML>=6.0
+# 微信桌面自动化（免费版）。仅支持 Windows + Python 3.9~3.12。
+# 免费版能力：ChatWith / ChatInfo / SendMsg / SendFiles / GetAllMessage / GetSession
+# 不含消息监听（AddListenChat 等为 Plus 付费版专属）。
+wxauto4>=41.1.7
+
+# 设置界面：本地服务 + WebView2 窗口。Windows 上用系统自带的 WebView2 运行时，无需另装。
+pywebview>=5.0

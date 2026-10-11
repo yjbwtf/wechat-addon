@@ -1,0 +1,1701 @@
+{
+ "fields": [
+  {
+   "index": 0,
+   "key": "config:mode",
+   "label": "自动发送",
+   "hint": "关闭则只生成草稿放到 data\\drafts，不真的发到群里",
+   "kind": "bool",
+   "wire": "str",
+   "options": null,
+   "on": "auto",
+   "off": "draft",
+   "page": "groups"
+  },
+  {
+   "index": 1,
+   "key": "config:whitelist_groups",
+   "label": "白名单群",
+   "hint": "每行一个群名，必须和微信里显示的完全一致。留空 = 不回复任何群",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "groups"
+  },
+  {
+   "index": 2,
+   "key": "config:bot_names",
+   "label": "机器人昵称",
+   "hint": "每行一个，用来识别 @",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "groups"
+  },
+  {
+   "index": 3,
+   "key": "config:require_at",
+   "label": "必须被 @ 才回复",
+   "hint": "关掉之后群里所有消息都会进候选，不建议",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "groups"
+  },
+  {
+   "index": 4,
+   "key": "config:ignore_self",
+   "label": "忽略自己发的消息",
+   "hint": "防止机器人把自己的话当成群友的话",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "groups"
+  },
+  {
+   "index": 5,
+   "key": "config:aggregate.enabled",
+   "label": "开启连续消息聚合",
+   "hint": "被 @ 之后先不回复，等对方说完再整合成一次回复",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "chat"
+  },
+  {
+   "index": 6,
+   "key": "config:aggregate.quiet_seconds",
+   "label": "静默判定（秒）",
+   "hint": "最后一条消息之后安静这么久，就认为对方说完了",
+   "kind": "float",
+   "wire": "float",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 7,
+   "key": "config:aggregate.max_wait_seconds",
+   "label": "最长等待（秒）",
+   "hint": "从第一句算起最多等这么久，对方一直发也会回",
+   "kind": "float",
+   "wire": "float",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 8,
+   "key": "config:aggregate.max_messages",
+   "label": "最多聚合条数",
+   "hint": "攒满这么多条立刻回复，不等静默",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 9,
+   "key": "config:aggregate.followup_sender",
+   "label": "吸收范围",
+   "hint": "观察期间哪些人的话算「同一段发言」",
+   "kind": "choice",
+   "wire": "str",
+   "options": [
+    "any",
+    "same"
+   ],
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 10,
+   "key": "config:catch_up.enabled",
+   "label": "开机补回",
+   "hint": "机器人停机期间错过的 @，启动后补答",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "groups"
+  },
+  {
+   "index": 11,
+   "key": "config:catch_up.lookback_messages",
+   "label": "补回回看条数",
+   "hint": "只看窗口最后 N 条，不翻旧账",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "groups"
+  },
+  {
+   "index": 12,
+   "key": "config:catch_up.max_per_group",
+   "label": "补回上限（每群）",
+   "hint": "每次启动每群最多补几条，防止开机刷屏",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "groups"
+  },
+  {
+   "index": 13,
+   "key": "config:rate_limit.per_group_per_hour",
+   "label": "每群每小时上限",
+   "hint": "超出直接静默丢弃，降低被举报概率",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "rate"
+  },
+  {
+   "index": 14,
+   "key": "config:rate_limit.min_interval_seconds",
+   "label": "两条回复最小间隔（秒）",
+   "hint": "同一群两条回复之间至少要隔这么久",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "rate"
+  },
+  {
+   "index": 15,
+   "key": "config:rate_limit.reply_delay_min",
+   "label": "随机延迟下限（秒）",
+   "hint": "回复前的随机等待，模拟真人打字节奏",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "rate"
+  },
+  {
+   "index": 16,
+   "key": "config:rate_limit.reply_delay_max",
+   "label": "随机延迟上限（秒）",
+   "hint": "和下限一起构成随机区间",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "rate"
+  },
+  {
+   "index": 17,
+   "key": "config:commands.enabled",
+   "label": "群内指令",
+   "hint": "消息里出现前缀即为指令，只有授权身份有效",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "owner"
+  },
+  {
+   "index": 18,
+   "key": "config:commands.allowed_senders",
+   "label": "授权昵称",
+   "hint": "每行一个。可以混写微信号／备注／微信昵称／群昵称：群昵称谁都能改最弱；备注只有机器人账号自己看得到，强一些；微信号改不了、群里看不到，最强。建议填微信号",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 19,
+   "key": "config:commands.secret",
+   "label": "指令口令",
+   "hint": "留空 = 不校验。写法参考 config.yaml 里的注释",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 20,
+   "key": "config:commands.reply_confirm",
+   "label": "指令回复确认",
+   "hint": "关掉后执行指令不在群里说话，更低调",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "owner"
+  },
+  {
+   "index": 21,
+   "key": "persona:default.name",
+   "label": "机器人名字",
+   "hint": "人设里的自称",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "persona"
+  },
+  {
+   "index": 22,
+   "key": "persona:style.enabled",
+   "label": "启用颜文字",
+   "hint": "按下面的权重，在回复末尾挂一个颜文字",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "persona"
+  },
+  {
+   "index": 23,
+   "key": "persona:style.kaomoji_rate",
+   "label": "颜文字权重",
+   "hint": "0.2 就是大约每五条回复里有一条带颜文字",
+   "kind": "float",
+   "wire": "float",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "persona"
+  },
+  {
+   "index": 24,
+   "key": "persona:style.strip_boilerplate",
+   "label": "削掉客服腔",
+   "hint": "自动去掉「有什么需要随时找我」这类结尾",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "persona"
+  },
+  {
+   "index": 25,
+   "key": "persona:style.kaomoji",
+   "label": "颜文字池",
+   "hint": "每行一个，程序随机抽一个挂上去",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "persona"
+  },
+  {
+   "index": 26,
+   "key": "persona:style.nudges",
+   "label": "空 @ 口头语池",
+   "hint": "只 @ 了机器人却没说话时用，每行一个",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "persona"
+  },
+  {
+   "index": 27,
+   "key": "persona:default.prompt",
+   "label": "人设提示词",
+   "hint": "性格、语气、接梗、拒绝的姿势都在这里。改完立即生效，不用重启",
+   "kind": "text",
+   "wire": "text",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "persona"
+  },
+  {
+   "index": 28,
+   "key": "config:dsh.command",
+   "label": "dsh 启动器",
+   "hint": "DeepSeek Harness 的命令行入口",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 29,
+   "key": "config:dsh.profile",
+   "label": "dsh profile",
+   "hint": "专用 profile，已内置人设约束与工具白名单",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 30,
+   "key": "config:dsh.timeout_seconds",
+   "label": "单次思考超时（秒）",
+   "hint": "超过就放弃这次回复",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 31,
+   "key": "config:history.enabled",
+   "label": "记录聊天历史",
+   "hint": "关掉后不再落库，上下文联想会失效",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "adv"
+  },
+  {
+   "index": 32,
+   "key": "config:history.retention",
+   "label": "保留策略",
+   "hint": "daily = 1 天，weekly = 下面填的天数，forever = 永久",
+   "kind": "choice",
+   "wire": "str",
+   "options": [
+    "daily",
+    "weekly",
+    "forever"
+   ],
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 33,
+   "key": "config:history.retention_days",
+   "label": "保留天数",
+   "hint": "retention = weekly 时生效",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 34,
+   "key": "config:history.per_group_max",
+   "label": "每群最多保存条数",
+   "hint": "超出按时间淘汰最旧",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 35,
+   "key": "config:history.reset_on_expiry",
+   "label": "到期后重新开始记录",
+   "hint": "窗口结束后清空该群历史",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "adv"
+  },
+  {
+   "index": 36,
+   "key": "config:history.read_limit.max_messages",
+   "label": "上下文条数上限",
+   "hint": "组装上下文时最多读多少条，约 30 条",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 37,
+   "key": "config:history.read_limit.max_chars",
+   "label": "上下文字数上限",
+   "hint": "防止超长记录把提示词撑爆",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 38,
+   "key": "config:history.read_limit.max_age_days",
+   "label": "上下文最大天数",
+   "hint": "比这更旧的消息不进上下文",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 39,
+   "key": "config:commands.prefix",
+   "label": "指令前缀",
+   "hint": "默认两个反斜杠。改了群里就得用新的",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 40,
+   "key": "config:logging.level",
+   "label": "日志级别",
+   "hint": "排错时临时改成 DEBUG",
+   "kind": "choice",
+   "wire": "str",
+   "options": [
+    "DEBUG",
+    "INFO",
+    "WARNING",
+    "ERROR"
+   ],
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 41,
+   "key": "config:split.enabled",
+   "label": "长回复拆成几条发",
+   "hint": "微信群里没人会发一整屏文字；关掉就一次发完",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "chat"
+  },
+  {
+   "index": 42,
+   "key": "config:split.min_chars",
+   "label": "超过多少字才拆",
+   "hint": "短于这个长度的回复不拆",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 43,
+   "key": "config:split.max_chars",
+   "label": "每条目标字数",
+   "hint": "用它算该拆几段，再按平均值匀开，避免一段长一段短",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 44,
+   "key": "config:split.max_parts",
+   "label": "最多拆几条",
+   "hint": "多出来的部分并进最后一条，防止刷屏",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 45,
+   "key": "config:memes.enabled",
+   "label": "启用梗词库",
+   "hint": "认得出网络热梗，命中才注入提示词",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "persona"
+  },
+  {
+   "index": 46,
+   "key": "config:memes.max_entries",
+   "label": "一次最多注入几个梗",
+   "hint": "注入越多越费 token，一般 4~8 就够",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "persona"
+  },
+  {
+   "index": 47,
+   "key": "config:memes.history_window",
+   "label": "往历史里看几条",
+   "hint": "只扫最近这几条。扫全部会导致每轮都命中同一个词、白花 token",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "persona"
+  },
+  {
+   "index": 48,
+   "key": "config:history.per_message_chars",
+   "label": "历史单条截断字数",
+   "hint": "历史里每条消息最多保留多少字。一次查天气要跑 3 步，每步都重发这段",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 49,
+   "key": "config:aggregate.after_reply_window",
+   "label": "回复后多久内不用再 @（秒）",
+   "hint": "不加这个的话，被 @ 一次之后对方再补一句就完全没反应，看起来像死机。0 = 关",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 50,
+   "key": "config:aggregate.after_reply_sender",
+   "label": "窗口内谁算接着聊",
+   "hint": "same = 只有刚才触发的人（推荐，大群不会变复读机）；any = 谁都算",
+   "kind": "choice",
+   "wire": "str",
+   "options": [
+    "same",
+    "any"
+   ],
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 51,
+   "key": "config:threads.enabled",
+   "label": "按人的连续对话",
+   "hint": "被 @ 一次之后，那个人接着说话不用再 @；判定是纯启发式的，不花 token",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "chat"
+  },
+  {
+   "index": 52,
+   "key": "config:threads.window_seconds",
+   "label": "话题保留多久（秒）",
+   "hint": "这么久不说话就算这个话题结束了",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 53,
+   "key": "config:threads.max_turns",
+   "label": "一个人最多连聊几轮",
+   "hint": "到轮数就收住，免得变成私聊刷屏",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 54,
+   "key": "config:threads.long_chars",
+   "label": "长文判定阈值（字）",
+   "hint": "超过这么多字又和上文零重合，判为在跟别人说话，不接",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 55,
+   "key": "config:mood.enabled",
+   "label": "开启心情值",
+   "hint": "按人记好感度（1~100），被冒犯会掉，影响之后的语气。数值由模型在同一次回复里给出，不额外花调用",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "chat"
+  },
+  {
+   "index": 56,
+   "key": "config:mood.initial",
+   "label": "初始心情值",
+   "hint": "刚认识时的态度，默认 100（一视同仁地友好）",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 57,
+   "key": "config:mood.max_down",
+   "label": "单次最多掉多少",
+   "hint": "防止一句话把好感打到底",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 58,
+   "key": "config:mood.neutral",
+   "label": "低于多少才变冷淡",
+   "hint": "高于这个值不注入额外语气说明（省 token）",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 59,
+   "key": "config:mood.angry",
+   "label": "低于多少算很不耐烦",
+   "hint": "到这个值以下会明显少话、不主动找话",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "chat"
+  },
+  {
+   "index": 60,
+   "key": "config:commands.identity_mode",
+   "label": "指令身份校验",
+   "hint": "any = 群昵称/备注/微信昵称/微信号 任一匹配（方便，但防不了冒用）；id = 只认微信号（严格，推荐）。急停/恢复不受影响，永远能停",
+   "kind": "choice",
+   "wire": "str",
+   "options": [
+    "any",
+    "id"
+   ],
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 61,
+   "key": "config:commands.verify_identity",
+   "label": "解析发送者身份",
+   "hint": "读取微信号/备注/微信昵称（只在指令消息上做，约 0.4 秒，有缓存）",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "owner"
+  },
+  {
+   "index": 62,
+   "key": "config:agent.enabled",
+   "label": "【危险】允许群内 \\agent 指令",
+   "hint": "开启后，授权的人在群里发 \\agent <任务> 就能让本机 agent 读改文件、跑命令。⚠ 群昵称可以被冒用，务必配合 commands.secret 和 identity_mode=id 使用。默认关闭，每次调用都会记进 data\\agent_audit.jsonl",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "owner"
+  },
+  {
+   "index": 63,
+   "key": "config:agent.require_secret",
+   "label": "agent 指令强制口令",
+   "hint": "开启时必须有非空的 commands.secret，否则拒绝启用。强烈建议保持开启",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "owner"
+  },
+  {
+   "index": 64,
+   "key": "config:agent.max_reply_chars",
+   "label": "agent 结果长度上限",
+   "hint": "结果太长就截断，群里没人看长报告",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 65,
+   "key": "config:agent.timeout_seconds",
+   "label": "agent 超时（秒）",
+   "hint": "超过这个时间就放弃这次任务",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 66,
+   "key": "config:screenshot.enabled",
+   "label": "允许群内 \\截图 指令",
+   "hint": "抓一张全屏截图发出去。⚠ 拍的是整块屏幕，包括当时开着的任何窗口",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "owner"
+  },
+  {
+   "index": 67,
+   "key": "config:screenshot.target",
+   "label": "截图发到哪里",
+   "hint": "same = 发回指令所在的聊天（群里所有人都看得到）；private = 私聊发给下面的收件人（推荐，尤其是大群）",
+   "kind": "choice",
+   "wire": "str",
+   "options": [
+    "same",
+    "private"
+   ],
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 68,
+   "key": "config:screenshot.private_to",
+   "label": "截图的私聊收件人",
+   "hint": "target=private 时发给谁（填微信里显示的昵称）",
+   "kind": "text",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 69,
+   "key": "config:screenshot.max_width",
+   "label": "截图最大宽度",
+   "hint": "缩到这个宽度再发，省流量也省时间。2K/4K 屏建议保持 1920",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 70,
+   "key": "config:poll.full_scan_every",
+   "label": "每几轮全量读取一次",
+   "hint": "机器人不是每轮都读所有群：只在微信报告「该群有未读」时才读，否则跳过，等下一次全量扫描。这是为了少抢微信焦点。代价是漏读窗口：默认 6 轮 ≈ 18 秒。怀疑漏消息就先调成 1（每轮全读，不漏但每 3 秒抢一次焦点），定位完再调回。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 71,
+   "key": "config:poll.load_more_times",
+   "label": "每次读取多加载几次历史",
+   "hint": "读取前调 LoadMoreCache 往上多加载几次。**这个值直接影响会不会漏消息**：微信窗口默认只装最近十几条，而机器人自己发的截图也占位置，会把还没处理的用户消息挤出窗口（实测用户连发 4 条只收到 1 条回复）。漏消息就调大（4~6）。代价：每次读取更慢，微信会话会上滚。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 72,
+   "key": "config:commands.short_prefix",
+   "label": "私聊简写前缀",
+   "hint": "只认**开头**。用于下面的可信会话，比如 /agent 看看README。因为 / 在正常聊天里太常见（路径、网址、分数），它只在可信会话里生效，群里一律走上面的指令前缀 + 口令。",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 73,
+   "key": "config:commands.trusted_chats",
+   "label": "可信会话（免 @ 免口令）",
+   "hint": "⚠ 每行一个。这些会话里的消息**不用 @**、指令**不用口令**，也不走线程判断。\n只填你自己的私聊。私聊的发送者没法冒充，所以免口令是安全的。\n**千万别填群名**：身份校验是 any 模式时，群昵称谁都能改，群里免口令 = 把机器人的完整控制权交给任何知道你代号的人。",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 74,
+   "key": "config:screenshot.words",
+   "label": "截图触发词",
+   "hint": "每行一个。指令正文的第一个词只要命中就算截图。中文会往词中间插字（截图 → 截个图 / 截张图），程序还有一层「子序列匹配」兜底，所以不用把所有变体都列全，列常用的就行。",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 75,
+   "key": "config:agent.words",
+   "label": "agent 触发词",
+   "hint": "每行一个。指令正文的第一个词命中就交给本机 agent。",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 76,
+   "key": "config:launch.enabled",
+   "label": "启用 \\开 指令",
+   "hint": "开启后，授权的人在群里发 \\开 原神 就能启动程序。**不走模型** —— 一条指令直达提权通道，几秒返回，不花 token。能启动哪些程序由 tools\\elevated\\run.ps1 里的白名单决定（路径写死在那份被 ACL 锁住的文件里，调用方只能选名字、不能传路径）。",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "owner"
+  },
+  {
+   "index": 77,
+   "key": "config:launch.words",
+   "label": "开程序触发词",
+   "hint": "每行一个。支持连写（开个原神 / 帮我开星铁）和 /开 一条龙。",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 78,
+   "key": "config:memes_update.enabled",
+   "label": "梗库定时联网更新",
+   "hint": "梗活得短，手工维护必然烂掉。开启后定期用带联网搜索的 profile 去网上捞新梗，写进 data\\memes_user.yaml（叠加层，**不碰** memes.yaml —— 那份有注释和排版，程序回写会毁掉它们）。捞到的同样能用 \\梗 del 删。",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "persona"
+  },
+  {
+   "index": 79,
+   "key": "config:memes_update.interval_days",
+   "label": "更新间隔（天）",
+   "hint": "多久捞一次。一次调用成本约等于查一次天气，默认 14 天。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "persona"
+  },
+  {
+   "index": 80,
+   "key": "config:memes_update.max_new",
+   "label": "单次最多新增几条",
+   "hint": "防止一次灌进来几十条把提示词撑爆。默认 20。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "persona"
+  },
+  {
+   "index": 81,
+   "key": "config:commands.restart_words",
+   "label": "重启触发词",
+   "hint": "每行一个。重启 = 退出再拉起（改完 config.yaml 或代码后用这个）；和「恢复」不同，恢复只是解除暂停，进程不动。persona.yaml / memes.yaml 是实时读的，不需要重启。",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  }
+ ],
+ "pages": [
+  {
+   "name": "pg_status",
+   "items": [
+    {
+     "t": "head",
+     "text": "运行"
+    },
+    {
+     "t": "button",
+     "index": 0
+    },
+    {
+     "t": "button",
+     "index": 1
+    },
+    {
+     "t": "button",
+     "index": 4
+    },
+    {
+     "t": "note",
+     "text": "「停止机器人」会先写 data\\STOP（立刻不再回复），再结束进程。桌面上的「急停」快捷方式做的是同一件事。"
+    },
+    {
+     "t": "head",
+     "text": "当前状态"
+    },
+    {
+     "t": "stat",
+     "index": 0
+    },
+    {
+     "t": "stat",
+     "index": 1
+    },
+    {
+     "t": "stat",
+     "index": 2
+    },
+    {
+     "t": "stat",
+     "index": 3
+    },
+    {
+     "t": "stat",
+     "index": 4
+    },
+    {
+     "t": "stat",
+     "index": 5
+    },
+    {
+     "t": "stat",
+     "index": 6
+    },
+    {
+     "t": "head",
+     "text": "运行日志"
+    }
+   ],
+   "title": "状态"
+  },
+  {
+   "name": "pg_groups",
+   "items": [
+    {
+     "t": "head",
+     "text": "白名单"
+    },
+    {
+     "t": "note",
+     "text": "机器人只在这些群里工作，其余群一条消息都不会读。群名必须和微信里显示的完全一致（含 emoji）。"
+    },
+    {
+     "t": "field",
+     "index": 1
+    },
+    {
+     "t": "head",
+     "text": "触发条件"
+    },
+    {
+     "t": "field",
+     "index": 2
+    },
+    {
+     "t": "field",
+     "index": 3
+    },
+    {
+     "t": "field",
+     "index": 4
+    },
+    {
+     "t": "head",
+     "text": "发送方式"
+    },
+    {
+     "t": "field",
+     "index": 0
+    },
+    {
+     "t": "head",
+     "text": "开机补回"
+    },
+    {
+     "t": "note",
+     "text": "机器人停机期间错过的 @ 消息，启动后补答。只看窗口最后 N 条，不翻旧账。"
+    },
+    {
+     "t": "field",
+     "index": 10
+    },
+    {
+     "t": "field",
+     "index": 11
+    },
+    {
+     "t": "field",
+     "index": 12
+    }
+   ],
+   "title": "群聊"
+  },
+  {
+   "name": "pg_chat",
+   "items": [
+    {
+     "t": "head",
+     "text": "连续消息聚合"
+    },
+    {
+     "t": "note",
+     "text": "群里常见的节奏是「@机器人」发一条，再把真正的问题分几条补上。开启后，被 @ 的那条不会立刻回复——程序会继续观察这个群，等对方说完，把这几条当成【同一次发言】整体理解，只回一条。"
+    },
+    {
+     "t": "field",
+     "index": 5
+    },
+    {
+     "t": "field",
+     "index": 6
+    },
+    {
+     "t": "field",
+     "index": 7
+    },
+    {
+     "t": "field",
+     "index": 8
+    },
+    {
+     "t": "field",
+     "index": 9
+    },
+    {
+     "t": "field",
+     "index": 49
+    },
+    {
+     "t": "field",
+     "index": 50
+    },
+    {
+     "t": "head",
+     "text": "连续对话（按人线程）"
+    },
+    {
+     "t": "note",
+     "text": "被 @ 一次之后，那个人接着说话就不用再 @ 了。判定是纯启发式的（字符重合度 + 「是不是在对别人说」），不额外调用模型。群里「右键引用」是最明确的路标：引用机器人的消息一定接，引用别人的一定不接。"
+    },
+    {
+     "t": "field",
+     "index": 51
+    },
+    {
+     "t": "field",
+     "index": 52
+    },
+    {
+     "t": "field",
+     "index": 53
+    },
+    {
+     "t": "field",
+     "index": 54
+    },
+    {
+     "t": "head",
+     "text": "心情值"
+    },
+    {
+     "t": "note",
+     "text": "按人记好感度，被出言不逊会掉，影响之后的语气。数值由模型在同一次回复末尾附一行给出来，不额外多花一次调用。"
+    },
+    {
+     "t": "field",
+     "index": 55
+    },
+    {
+     "t": "field",
+     "index": 56
+    },
+    {
+     "t": "field",
+     "index": 57
+    },
+    {
+     "t": "field",
+     "index": 58
+    },
+    {
+     "t": "field",
+     "index": 59
+    },
+    {
+     "t": "head",
+     "text": "分段发送"
+    },
+    {
+     "t": "note",
+     "text": "长回复拆成几条发，像真人想到什么发什么。模型主动留空行的地方一定会拆；其余按句子匀开。注意：拆出来的每一条都计入「每群每小时上限」。"
+    },
+    {
+     "t": "field",
+     "index": 41
+    },
+    {
+     "t": "field",
+     "index": 42
+    },
+    {
+     "t": "field",
+     "index": 43
+    },
+    {
+     "t": "field",
+     "index": 44
+    }
+   ],
+   "title": "连续消息"
+  },
+  {
+   "name": "pg_rate",
+   "items": [
+    {
+     "t": "head",
+     "text": "节奏限制"
+    },
+    {
+     "t": "note",
+     "text": "主要目的不是防技术检测，而是别让人觉得烦、别被人举报。回复前的随机延迟让节奏更像真人。"
+    },
+    {
+     "t": "field",
+     "index": 13
+    },
+    {
+     "t": "field",
+     "index": 14
+    },
+    {
+     "t": "field",
+     "index": 15
+    },
+    {
+     "t": "field",
+     "index": 16
+    }
+   ],
+   "title": "频率与安全"
+  },
+  {
+   "name": "pg_persona",
+   "items": [
+    {
+     "t": "head",
+     "text": "人味"
+    },
+    {
+     "t": "note",
+     "text": "persona.yaml 每次请求都重新读取，改完【立即生效】，不用重启机器人。颜文字的权重由程序掷骰子保证，不是让模型自己猜概率。"
+    },
+    {
+     "t": "field",
+     "index": 21
+    },
+    {
+     "t": "field",
+     "index": 22
+    },
+    {
+     "t": "field",
+     "index": 23
+    },
+    {
+     "t": "field",
+     "index": 24
+    },
+    {
+     "t": "head",
+     "text": "素材池"
+    },
+    {
+     "t": "field",
+     "index": 25
+    },
+    {
+     "t": "field",
+     "index": 26
+    },
+    {
+     "t": "head",
+     "text": "人设提示词"
+    },
+    {
+     "t": "field",
+     "index": 27
+    },
+    {
+     "t": "head",
+     "text": "梗词库"
+    },
+    {
+     "t": "note",
+     "text": "认得出网络热梗，命中才注入，没命中一个 token 都不花。词库在 memes.yaml；在群里教新梗：\\\\梗 add 词 | 说明"
+    },
+    {
+     "t": "field",
+     "index": 45
+    },
+    {
+     "t": "field",
+     "index": 46
+    },
+    {
+     "t": "field",
+     "index": 47
+    },
+    {
+     "t": "head",
+     "text": "梗库自动更新"
+    },
+    {
+     "t": "field",
+     "index": 78
+    },
+    {
+     "t": "field",
+     "index": 79
+    },
+    {
+     "t": "field",
+     "index": 80
+    }
+   ],
+   "title": "人设与语气"
+  },
+  {
+   "name": "pg_owner",
+   "items": [
+    {
+     "t": "head",
+     "text": "群内控制指令"
+    },
+    {
+     "t": "note",
+     "text": "指令前缀、口令，以及谁有权发指令。注意：口令在群里发过就等于公开，群消息所有成员都看得到。"
+    },
+    {
+     "t": "field",
+     "index": 17
+    },
+    {
+     "t": "field",
+     "index": 81
+    },
+    {
+     "t": "field",
+     "index": 39
+    },
+    {
+     "t": "field",
+     "index": 19
+    },
+    {
+     "t": "field",
+     "index": 20
+    },
+    {
+     "t": "head",
+     "text": "身份校验（谁有权发指令）"
+    },
+    {
+     "t": "note",
+     "text": "群昵称全群可见、成员自己能改，防不了冒用。备注只有机器人账号自己看得到，强一些；微信号改不了、群里基本看不到，最强。「急停/恢复」有安全阀，严格模式读不到微信号时会降级放行，不会把你自己锁在门外。"
+    },
+    {
+     "t": "field",
+     "index": 18
+    },
+    {
+     "t": "field",
+     "index": 60
+    },
+    {
+     "t": "field",
+     "index": 61
+    },
+    {
+     "t": "head",
+     "text": "危险区：\\agent 远程操作"
+    },
+    {
+     "t": "note",
+     "text": "开启后，授权的人在群里发 \\agent <任务> 就能让本机 agent 读改文件、跑命令。没有任何隔离层——能在群里发这条指令的人，等于能操作这台机器。只适合群成员都是自己人的场景，并请配合口令和 identity_mode=id。"
+    },
+    {
+     "t": "field",
+     "index": 62
+    },
+    {
+     "t": "field",
+     "index": 63
+    },
+    {
+     "t": "field",
+     "index": 64
+    },
+    {
+     "t": "field",
+     "index": 65
+    },
+    {
+     "t": "head",
+     "text": "截图指令"
+    },
+    {
+     "t": "note",
+     "text": "抓的是整块屏幕，包括当时开着的任何窗口。发到 19 人的群里 = 全群都看得到。只想给自己看就选 private。"
+    },
+    {
+     "t": "field",
+     "index": 66
+    },
+    {
+     "t": "field",
+     "index": 67
+    },
+    {
+     "t": "field",
+     "index": 68
+    },
+    {
+     "t": "field",
+     "index": 69
+    },
+    {
+     "t": "head",
+     "text": "可信会话与判断词"
+    },
+    {
+     "t": "field",
+     "index": 72
+    },
+    {
+     "t": "field",
+     "index": 73
+    },
+    {
+     "t": "field",
+     "index": 74
+    },
+    {
+     "t": "field",
+     "index": 75
+    },
+    {
+     "t": "field",
+     "index": 76
+    },
+    {
+     "t": "field",
+     "index": 77
+    }
+   ],
+   "title": "权限"
+  },
+  {
+   "name": "pg_adv",
+   "items": [
+    {
+     "t": "head",
+     "text": "大脑"
+    },
+    {
+     "t": "field",
+     "index": 28
+    },
+    {
+     "t": "field",
+     "index": 29
+    },
+    {
+     "t": "field",
+     "index": 30
+    },
+    {
+     "t": "head",
+     "text": "聊天记录"
+    },
+    {
+     "t": "field",
+     "index": 31
+    },
+    {
+     "t": "field",
+     "index": 32
+    },
+    {
+     "t": "field",
+     "index": 33
+    },
+    {
+     "t": "field",
+     "index": 34
+    },
+    {
+     "t": "field",
+     "index": 35
+    },
+    {
+     "t": "head",
+     "text": "上下文"
+    },
+    {
+     "t": "field",
+     "index": 36
+    },
+    {
+     "t": "field",
+     "index": 37
+    },
+    {
+     "t": "field",
+     "index": 38
+    },
+    {
+     "t": "field",
+     "index": 48
+    },
+    {
+     "t": "head",
+     "text": "其它"
+    },
+    {
+     "t": "field",
+     "index": 40
+    },
+    {
+     "t": "head",
+     "text": "文件"
+    },
+    {
+     "t": "button",
+     "index": 5
+    },
+    {
+     "t": "button",
+     "index": 6
+    },
+    {
+     "t": "button",
+     "index": 7
+    },
+    {
+     "t": "button",
+     "index": 8
+    },
+    {
+     "t": "head",
+     "text": "轮询节奏"
+    },
+    {
+     "t": "note",
+     "text": "消息在眼皮底下漏了？先动这里。"
+    },
+    {
+     "t": "field",
+     "index": 70
+    },
+    {
+     "t": "field",
+     "index": 71
+    }
+   ],
+   "title": "高级"
+  }
+ ],
+ "actions": [
+  {
+   "label": "启动机器人",
+   "primary": 1,
+   "danger": 0,
+   "width": 0
+  },
+  {
+   "label": "停止机器人",
+   "primary": 0,
+   "danger": 1,
+   "width": 0
+  },
+  {
+   "label": "保存配置",
+   "primary": 1,
+   "danger": 0,
+   "width": 0
+  },
+  {
+   "label": "放弃修改",
+   "primary": 0,
+   "danger": 0,
+   "width": 0
+  },
+  {
+   "label": "刷新状态",
+   "primary": 0,
+   "danger": 0,
+   "width": 0
+  },
+  {
+   "label": "打开 config.yaml",
+   "primary": 0,
+   "danger": 0,
+   "width": 212
+  },
+  {
+   "label": "打开 persona.yaml",
+   "primary": 0,
+   "danger": 0,
+   "width": 224
+  },
+  {
+   "label": "打开日志",
+   "primary": 0,
+   "danger": 0,
+   "width": 0
+  },
+  {
+   "label": "打开目录",
+   "primary": 0,
+   "danger": 0,
+   "width": 0
+  },
+  {
+   "label": "重新读取",
+   "primary": 0,
+   "danger": 0,
+   "width": 0
+  }
+ ],
+ "stats": [
+  {
+   "label": "运行状态",
+   "key": "@status.running"
+  },
+  {
+   "label": "进程 PID",
+   "key": "@status.pid"
+  },
+  {
+   "label": "急停标记",
+   "key": "@status.stopped"
+  },
+  {
+   "label": "历史消息",
+   "key": "@status.history_total"
+  },
+  {
+   "label": "覆盖群数",
+   "key": "@status.history_groups"
+  },
+  {
+   "label": "工作目录",
+   "key": "@status.root"
+  },
+  {
+   "label": "日志文件",
+   "key": "@status.log"
+  }
+ ]
+}
