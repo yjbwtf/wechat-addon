@@ -1004,6 +1004,42 @@
    "on": null,
    "off": null,
    "page": "owner"
+  },
+  {
+   "index": 82,
+   "key": "config:logs.cleanup_enabled",
+   "label": "定时清除旧日志",
+   "hint": "日志会一直涨（bot.log 每次重启都追加），加上控制台输出和审计日志，data\\ 目录几个月就能到几百 MB。开启后按时间删超过下面天数的 *.log。不做轮转 —— 这个项目不需要留历史日志，只需要能查最近的问题。",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "adv"
+  },
+  {
+   "index": 83,
+   "key": "config:logs.keep_days",
+   "label": "日志保留天数",
+   "hint": "超过这么多天的 *.log 会被删掉。0 表示不删。正在写的那个文件删不掉，会被跳过（正常情况，不是故障）。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
+  },
+  {
+   "index": 84,
+   "key": "config:logs.check_hours",
+   "label": "检查间隔（小时）",
+   "hint": "多久检查一次。低频就够，删日志不着急。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv"
   }
  ],
  "pages": [
@@ -1601,6 +1637,22 @@
     {
      "t": "field",
      "index": 71
+    },
+    {
+     "t": "head",
+     "text": "日志清理"
+    },
+    {
+     "t": "field",
+     "index": 82
+    },
+    {
+     "t": "field",
+     "index": 83
+    },
+    {
+     "t": "field",
+     "index": 84
     }
    ],
    "title": "高级"

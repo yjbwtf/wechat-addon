@@ -110,6 +110,21 @@ class LaunchConfig:
 
 
 @dataclass
+class LogsConfig:
+    """日志的定期清理。
+
+    日志会一直涨（bot.log 每次重启都追加），加上控制台输出、
+    审计日志、截图目录，data/ 几个月就能到几百 MB。
+    """
+
+    cleanup_enabled: bool = True
+    #: 超过这么多天的 *.log 删掉。0 表示不删
+    keep_days: float = 14.0
+    #: 多久检查一次（小时）。低频就够，删日志不着急
+    check_hours: float = 6.0
+
+
+@dataclass
 class PollConfig:
     """轮询节奏。漏消息时先动这里。"""
 
@@ -335,6 +350,7 @@ class Config:
     memes_update: AutoUpdateConfig
     launch: LaunchConfig
     poll: PollConfig
+    logs: LogsConfig
     threads: ThreadConfig
     mood: MoodConfig
     agent: AgentConfig
@@ -462,6 +478,13 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         learn_hint=bool(mem_raw.get("learn_hint", False)),
     )
 
+    logs_raw = _section(raw, "logs")
+    logs = LogsConfig(
+        cleanup_enabled=bool(logs_raw.get("cleanup_enabled", True)),
+        keep_days=float(logs_raw.get("keep_days", 14) or 0),
+        check_hours=float(logs_raw.get("check_hours", 6) or 6),
+    )
+
     poll_raw = _section(raw, "poll")
     poll = PollConfig(
         full_scan_every=max(1, int(poll_raw.get("full_scan_every", 6))),
@@ -583,6 +606,7 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         memes_update=memes_update,
         launch=launch,
         poll=poll,
+        logs=logs,
         threads=threads,
         mood=mood,
         agent=agent,

@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+LOG_DIR = ROOT / "data" / "logs"
 sys.path.insert(0, str(ROOT))
 
 import ui_bridge as B  # noqa: E402
@@ -204,16 +205,28 @@ def bot_stop() -> dict:
     return {"ok": False, "message": "找不到 stop.cmd / stop.py"}
 
 
-def log_tail(lines: int = 400) -> str:
-    p = ROOT / "data" / "logs" / "bot.log"
-    if not p.is_file():
-        return "(还没有日志文件)"
-    try:
-        text = p.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError as exc:
-        return f"(读不到日志：{exc})"
-    return "\n".join(text[-lines:])
+def log_tail(lines: int = 200) -> str:
+    """日志区的内容：结构化日志 + 被隐藏的控制台输出。
 
+    机器人现在用 pythonw 起（无窗口），它的 stdout/stderr 被重定向到
+    data/logs/bot-console.log —— wxauto4 的横幅、崩溃栈都在那里。
+    隐藏了窗口却看不到那些输出，排查就没法做了，所以这里一并带出来。
+
+    加个分隔标题是为了让「这段不是 logging 写的」一目了然。
+    """
+    out = []
+    for name, title in (("bot.log", "运行日志"),
+                        ("bot-console.log", "控制台输出（进程的输出，含崩溃栈）")):
+        f = LOG_DIR / name
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        tail = "\\n".join(text.splitlines()[-lines:]) if text else ""
+        if not tail.strip():
+            continue
+        out.append(f"===== {title}（{name}）=====\\n{tail}")
+    return "\\n\\n".join(out) if out else "（还没有日志）"
 
 def open_path(which: str) -> dict:
     targets = {

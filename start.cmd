@@ -38,6 +38,9 @@ rem  %~dp0 always ends with a backslash, so %ROOT%venv works.
 set "ROOT=%~dp0"
 set "VENVROOT=%ROOT%venv"
 set "PY=%VENVROOT%\Scripts\python.exe"
+rem  pythonw.exe = no console window. The bot redirects its own
+rem  stdout/stderr to data\logs\bot-console.log, so nothing is lost.
+set "PYW=%VENVROOT%\Scripts\pythonw.exe"
 set "MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple"
 
 rem  Base interpreter used to CREATE the venv (first run only).
@@ -93,7 +96,7 @@ if /i "%~1"=="-UIWeb"   goto uiweb
 
 rem --- real start: now it is safe to clear the emergency-stop flag ---
 if exist "%ROOT%data\STOP" del /q "%ROOT%data\STOP"
-"%PY%" -m src.main
+"%PYW%" -m src.main
 exit /b %errorlevel%
 
 :setup

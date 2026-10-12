@@ -32,7 +32,7 @@ from .brain import Brain, BrainError, build_prompt
 from .config import CONFIG_PATH, ROOT, Config, load_config, load_persona
 from .drafts import DraftStore
 from .history import HistoryStore, StoredMessage
-from . import elevate, meme_feed
+from . import elevate, logkeep, meme_feed
 from .memes import MemeBook
 from .mood import MoodStore, parse_mood_tag
 from .policy import Gatekeeper, StopSwitch, make_msg_key
@@ -124,6 +124,7 @@ class Bot:
         self._next_purge = 0.0
         self._next_meme_reload = 0.0
         self._next_meme_update = 0.0
+        self._next_log_cleanup = 0.0
 
         # 耗时指令（agent / 开程序）跑在后台线程，结果通过这个队列交回
         # 主线程发送。**发送只能由主线程做** —— wxauto4 走 UIA，不是
@@ -965,6 +966,20 @@ class Bot:
             except Exception as exc:  # noqa: BLE001
                 logging.warning("梗库自动更新出错（不影响聊天）：%s", exc)
 
+        # 清旧日志。低频（默认 6 小时一次），删不掉就跳过 ——
+        # 当前正在写的 bot.log 是删不掉的，那是正常情况不是故障。
+        if now >= self._next_log_cleanup:
+            self._next_log_cleanup = now + max(0.5, self.cfg.logs.check_hours) * 3600
+            if self.cfg.logs.cleanup_enabled:
+                try:
+                    n, freed = logkeep.cleanup_logs(
+                        self.cfg.data_dir / "logs", self.cfg.logs.keep_days)
+                    if n:
+                        logging.warning("清理旧日志：%d 个文件，释放 %.1f MB",
+                                        n, freed / 1048576)
+                except Exception as exc:  # noqa: BLE001
+                    logging.warning("清理日志出错（不影响聊天）：%s", exc)
+
         if now < self._next_purge:
             return
         self._next_purge = now + max(1, self.cfg.history.purge_interval_min) * 60
@@ -1446,5 +1461,47 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _setup_console_output() -> None:
+    """把 stdout/stderr 接到文件上，让 pythonw 下也能跑。
+
+    **为什么必须自己做**：`start.cmd` 现在用 pythonw.exe 起（无窗口），
+    而 pythonw 下 `sys.stdout` 可能是 None 或坏的 —— 一个 print() 就能让
+    程序起不来。ui_app.py 上已经踩过一次同样的坑。
+
+    为什么不靠 cmd 的重定向：`start "" prog >> log` 里的重定向作用于
+    `start` 自身而不是被拉起的子进程，很容易写错。让程序自己接最可靠。
+
+    接到 data/logs/bot-console.log —— wxauto4 的横幅、崩溃栈都在这里，
+    正好补上"cmd 窗口被隐藏后看不到的东西"。
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+    ok = False
+    try:
+        if _sys.stdout is not None:
+            _sys.stdout.write("")
+            _sys.stdout.flush()
+            ok = True
+    except Exception:  # noqa: BLE001
+        ok = False
+    if ok:
+        return                       # 有能用的控制台，不用改
+    path = _Path(__file__).resolve().parent.parent / "data" / "logs" / "bot-console.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(path, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        class _Null:
+            def write(self, *_a): return 0
+            def flush(self): pass
+        _sys.stdout = _Null()
+        _sys.stderr = _Null()
+        return
+    fh.write("\n===== %s 启动 =====\n" % __import__("time").strftime("%Y-%m-%d %H:%M:%S"))
+    _sys.stdout = fh
+    _sys.stderr = fh
+
+
 if __name__ == "__main__":
+    _setup_console_output()          # 必须在任何 print 之前
     raise SystemExit(main())
