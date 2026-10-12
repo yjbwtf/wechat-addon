@@ -32,7 +32,7 @@ from .brain import Brain, BrainError, build_prompt
 from .config import CONFIG_PATH, ROOT, Config, load_config, load_persona
 from .drafts import DraftStore
 from .history import HistoryStore, StoredMessage
-from . import elevate, enka, logkeep, meme_feed, model_preset
+from . import elevate, enka, logkeep, meme_feed, model_preset, mona
 from .memes import MemeBook
 from .mood import MoodStore, parse_mood_tag
 from .policy import Gatekeeper, StopSwitch, make_msg_key
@@ -743,8 +743,14 @@ class Bot:
             game = enka.ALIASES.get(cfg.default_game, None)
 
         try:
+            # 算分权重：按角色覆盖 -> 全局 -> 莫娜默认。
+            # 列表视图没有具体角色，就用全局那份。
+            weights = None
+            if cfg.score.enabled:
+                weights = mona.weights_for(cfg.score.stats,
+                                           cfg.score.by_character, focus)
             ok, text = enka.query(game, uid, cfg, self.enka_cache,
-                                  focus=focus or None)
+                                  focus=focus or None, weights=weights)
         except Exception as exc:  # noqa: BLE001
             # 查询本身不该把主循环带崩：网络库偶尔会抛些奇怪的东西
             logging.exception("enka 查询异常：%s", exc)

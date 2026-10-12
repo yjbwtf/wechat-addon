@@ -35,6 +35,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from . import mona
+
 ROOT = Path(__file__).resolve().parent.parent
 NAMES_PATH = ROOT / "assets" / "enka_names.json"
 
@@ -198,6 +200,13 @@ def _parse_build(avatar: dict) -> tuple[dict | None, list[dict]]:
                 "subs": [(_short(s.get("appendPropId")),
                           _stat_value(s.get("appendPropId"), s.get("statValue")))
                          for s in (flat.get("reliquarySubstats") or [])],
+                # 算「有效词条」分要用**原始** prop + 数值，不能用上面那串
+                # 格式化过的文本（名字被缩短过、百分号也混进去了）。
+                # 单位在这里就对齐好（百分比词条 /100），否则分数会大 100 倍。
+                "subs_raw": [(s.get("appendPropId"),
+                              _norm_value(s.get("appendPropId"),
+                                          s.get("statValue")))
+                             for s in (flat.get("reliquarySubstats") or [])],
             })
     # 按部位固定顺序排（花/羽/沙/杯/冠），接口给的顺序不保证
     order = {v: i for i, v in enumerate(_SLOTS.values())}
@@ -359,8 +368,9 @@ def _equip_level(game: str, level) -> str:
     return "Lv.%d" % int(level)
 
 
-def _build_line(name: str, level: str, cons: str, build) -> str:
-    """展柜列表里的一行：名字 等级 命座 · 武器 · 圣遗物套装。"""
+def _build_line(name: str, level: str, cons: str, build,
+                weights: dict | None = None) -> str:
+    """展柜列表里的一行：名字 等级 命座 · 武器 · 套装 · 词条分。"""
     bits = ["%s %s%s" % (name, level, (" " + cons) if cons else "")]
     weapon, arts = build
     if weapon:
@@ -372,6 +382,10 @@ def _build_line(name: str, level: str, cons: str, build) -> str:
         bits.append(w)
     if arts:
         bits.append(_set_summary(arts))
+        total = [sc for sc in (_art_score(a, weights) for a in arts)
+                 if sc is not None]
+        if total:
+            bits.append("词条分 %.1f" % sum(total))
     return " · ".join(bits)
 
 
@@ -605,7 +619,36 @@ _REGION = {"cn": "国服", "os_usa": "美服", "os_euro": "欧服",
            "na": "美服", "eu": "欧服", "asia": "亚服", "tw": "台港澳服"}
 
 
-def _detail_reply(game: str, label: str, nick: str, uid: str, who: dict) -> str:
+def _norm_value(prop: str, value):
+    """把接口的词条值换成**算分用的单位**。
+
+    **这一步不做，分数会大 100 倍。** 接口对百分比词条给的是百分数
+    （充能效率 `24` 表示 24%），而莫娜那张 EFF 表用的是小数（`0.065` = 6.5%）。
+    实测踩过：没对齐单位时一件圣遗物能算出一千多分。
+    """
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return value
+    if prop in _PERCENT_PROPS:
+        return num / 100.0
+    return num
+
+
+def _art_score(art: dict, weights: dict | None) -> float | None:
+    """一件圣遗物的「有效词条」分（莫娜占卜铺那套）。
+
+    只在**原神**上算 —— 崩铁的遗器和绝区零的驱动盘是另一套词条体系，
+    莫娜本身也只做原神。
+    """
+    raw = art.get("subs_raw")
+    if not raw or weights is None:
+        return None
+    return mona.score(raw, art.get("rank") or 5, weights)
+
+
+def _detail_reply(game: str, label: str, nick: str, uid: str, who: dict,
+                  weights: dict | None = None) -> str:
     """单个角色的完整面板：武器/光锥/音擎 + 五~六件装备（主词条 + 副词条）。"""
     term = _TERM.get(game, _TERM["gi"])
     lines = ["%s · %s（UID %s）" % (label, nick, uid),
@@ -625,13 +668,35 @@ def _detail_reply(game: str, label: str, nick: str, uid: str, who: dict) -> str:
         lines.append("%s：没看到（展柜里没放，或者详细数据没开放）" % term["equip"])
         return "\n".join(lines)
     lines.append("%s：%s" % (term["equip"], _set_summary(arts)))
+    scored: list[float] = []
+    unscored = 0
     for a in arts:
         subs = "  ".join("%s%s" % (n, v) for n, v in a["subs"])
-        lines.append("  %s %s %s · %s%s%s"
+        sc = _art_score(a, weights)
+        tail = ""
+        if sc is not None:
+            # 没满级的标 * —— 莫娜那边给的是「强化满级的期望分」，
+            # 这里给的是当前分，不标出来会被当成同一个数字
+            star = "" if (a.get("level") or 0) >= 21 else "*"
+            tail = "  → %.1f%s" % (sc, star)
+            scored.append(sc)
+            if star:
+                unscored += 1
+        lines.append("  %s %s %s · %s%s%s%s"
                      % (a["slot"], a.get("lv") or "", a["set"],
                         a["main"], a["main_val"],
-                        ("  |  " + subs) if subs else ""))
+                        ("  |  " + subs) if subs else "", tail))
+    if scored:
+        lines.append("有效词条合计：%.1f（莫娜占卜铺那套：%s，各自权重 1）"
+                     % (sum(scored), "、".join(_weight_names(weights))))
+        if unscored:
+            lines.append("带 * 的没强化满 —— 这里是**当前分**，"
+                         "莫娜那边显示的是强化满级的**期望分**")
     return "\n".join(lines)
+
+
+def _weight_names(weights: dict | None) -> list[str]:
+    return list((weights or {}).keys())
 
 
 def _gi_payload(data: dict) -> dict:
@@ -780,7 +845,8 @@ def parse_payload(game: str, data: dict) -> dict:
     return _gi_payload(data)
 
 
-def render(game: str, uid: str, parsed: dict, focus: str | None = None) -> str:
+def render(game: str, uid: str, parsed: dict, focus: str | None = None,
+           weights: dict | None = None) -> str:
     """精简结构 -> 要发出去的文字。可以反复调（不改 parsed）。"""
     label = GAME_LABEL.get(game, game)
     nick = parsed.get("nick") or "?"
@@ -792,7 +858,7 @@ def render(game: str, uid: str, parsed: dict, focus: str | None = None) -> str:
         key = focus.strip().lower()
         hit = next((a for a in avatars if key and key in a["name"].lower()), None)
         if hit:
-            return _detail_reply(game, label, nick, uid, hit)
+            return _detail_reply(game, label, nick, uid, hit, weights)
         have = "、".join(a["name"] for a in avatars[:12])
         cause = ("展柜只有概要，看不到角色详情" if summary_only
                  else "展柜里没有这个角色")
@@ -813,7 +879,8 @@ def render(game: str, uid: str, parsed: dict, focus: str | None = None) -> str:
     lines.append("展柜 %d 个：" % len(avatars))
     for a in shown:
         lines.append("  " + _build_line(a["name"], a["level"], a["cons"],
-                                        a.get("build") or (None, [])))
+                                        a.get("build") or (None, []),
+                                        weights))
     if len(avatars) > len(shown):
         lines.append("  ……还有 %d 个" % (len(avatars) - len(shown)))
     if summary_only:
@@ -831,14 +898,17 @@ def render(game: str, uid: str, parsed: dict, focus: str | None = None) -> str:
 
 
 def format_reply(game: str, uid: str, data: dict,
-                 focus: str | None = None) -> str:
+                 focus: str | None = None,
+                 weights: dict | None = None) -> str:
     """解析 + 渲染。给测试和一次性调用用；query() 走缓存那条路。"""
-    return render(game, uid, parse_payload(game, data), focus=focus)
+    return render(game, uid, parse_payload(game, data), focus=focus,
+                  weights=weights)
 
 
 # ------------------------------------------------------------------ 对外入口
 def query(game: str | None, uid: str, cfg, cache: Cache,
-          focus: str | None = None) -> tuple[bool, str]:
+          focus: str | None = None,
+          weights: dict | None = None) -> tuple[bool, str]:
     """查一个 UID。返回 (成功?, 要发出去的文字)。
 
     game 为 None 时按 gi -> hsr -> zzz 依次试。
@@ -858,7 +928,7 @@ def query(game: str | None, uid: str, cfg, cache: Cache,
     for g in order:
         hit = cache.get_payload("%s:%s" % (g, uid))
         if hit:
-            return True, render(g, uid, hit, focus=focus)
+            return True, render(g, uid, hit, focus=focus, weights=weights)
 
     why = cache.allow(getattr(cfg, "min_interval_seconds", 3.0),
                       getattr(cfg, "max_per_hour", 60))
@@ -881,7 +951,7 @@ def query(game: str | None, uid: str, cfg, cache: Cache,
         cache.put_payload("%s:%s" % (g, uid), parsed, float(data.get("ttl") or 0))
         if game is None:
             logging.info("enka: UID %s 命中 %s", uid, GAME_LABEL.get(g, g))
-        return True, render(g, uid, parsed, focus=focus)
+        return True, render(g, uid, parsed, focus=focus, weights=weights)
 
     return False, last_err or "三个游戏都查不到这个 UID。"
 

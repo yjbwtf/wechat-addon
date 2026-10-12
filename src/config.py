@@ -143,6 +143,27 @@ class BrushConfig:
 
 
 @dataclass
+class EnkaScoreConfig:
+    """圣遗物评分：莫娜占卜铺的「有效词条」。
+
+    公式照抄 [wormtql/genshin_artifact](https://github.com/wormtql/genshin_artifact)
+    （见 src/mona.py 的注释里写了具体文件和出处）：
+    每条副词条按 `数值 / 单次强化最大档位 × 权重` 算，**一次满档 = 1 分**。
+
+    莫娜的默认权重是「暴击率 1、暴击伤害 1、攻击力% 1」，其余 0 ——
+    也就是大家说的「双暴 + 攻击% 词条分」。这里保持同样的默认。
+    """
+
+    enabled: bool = True
+    #: 算分用哪些词条。可以只写名字（权重 1），也可以写「名字 权重」
+    stats: list[str] = field(
+        default_factory=lambda: ["暴击率", "暴击伤害", "攻击力%"])
+    #: 按角色覆盖，格式：`角色名 | 词条1 词条2 权重3`。
+    #: 生命/防御/精通/充能这些主属性的角色，默认那三项算出来的分没意义。
+    by_character: list[str] = field(default_factory=list)
+
+
+@dataclass
 class EnkaConfig:
     """`\\uid [游戏] <UID>`：查米哈游账号的**公开角色展柜**（Enka.Network）。
 
@@ -174,6 +195,8 @@ class EnkaConfig:
     min_interval_seconds: float = 3.0
     #: 每小时最多发几次真实请求（跨重启累计）
     max_per_hour: int = 60
+    #: 圣遗物评分（莫娜占卜铺的「有效词条」）
+    score: EnkaScoreConfig = field(default_factory=EnkaScoreConfig)
 
 
 @dataclass
@@ -622,7 +645,14 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
     )
 
     en_raw = _section(raw, "enka")
+    sc_raw = _section(en_raw, "score")
     enka = EnkaConfig(
+        score=EnkaScoreConfig(
+            enabled=bool(sc_raw.get("enabled", True)),
+            stats=[str(s) for s in (sc_raw.get("stats") or
+                                    ["暴击率", "暴击伤害", "攻击力%"])],
+            by_character=[str(s) for s in (sc_raw.get("by_character") or [])],
+        ),
         enabled=bool(en_raw.get("enabled", True)),
         words=[str(w) for w in
                (en_raw.get("words") or ["查询", "uid", "查询uid", "战绩"])],

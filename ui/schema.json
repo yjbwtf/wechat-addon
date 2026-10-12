@@ -1269,6 +1269,48 @@
    "on": null,
    "off": null,
    "page": "api"
+  },
+  {
+   "index": 100,
+   "key": "config:enka.score.enabled",
+   "label": "圣遗物评分",
+   "hint": "莫娜占卜铺的「有效词条」：每条副词条 `数值 / 单次强化满档值 × 权重` 求和，**一次满档 = 1 分**。\n只统计副词条（主词条不算，莫娜也是这么算的）。",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "api"
+  },
+  {
+   "index": 101,
+   "key": "config:enka.score.stats",
+   "label": "算分用哪些词条",
+   "hint": "默认「暴击率 / 暴击伤害 / 攻击力%」—— 和莫娜的默认一致，也就是常说的双暴 + 攻击词条分。\n想调权重就写「词条名 权重」：`攻击力% 0.8`。\n可选：攻击力、攻击力%、防御力、防御力%、生命值、生命值%、暴击率、暴击伤害、元素精通、元素充能效率、治疗加成。",
+   "kind": "rows",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api",
+   "parts": [
+    "词条 [权重]"
+   ]
+  },
+  {
+   "index": 102,
+   "key": "config:enka.score.by_character",
+   "label": "按角色覆盖",
+   "hint": "生命/防御/精通/充能主属性的角色，用默认那三项算出来的分没意义。\n格式：`角色名 | 词条1 词条2 权重3`，例如 `胡桃 | 暴击率 暴击伤害 生命值% 0.8`。\n角色名和点名一样支持子串匹配。",
+   "kind": "rows",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api",
+   "parts": [
+    "角色 | 词条…"
+   ]
   }
  ],
  "pages": [
@@ -1854,6 +1896,26 @@
       {
        "t": "field",
        "index": 99
+      },
+      {
+       "t": "head",
+       "text": "圣遗物评分（莫娜占卜铺）"
+      },
+      {
+       "t": "note",
+       "text": "算法照抄 [wormtql/genshin_artifact](https://github.com/wormtql/genshin_artifact)（莫娜占卜铺）。它自己的说明是「**以单次强化最大档位为 1 分**」。\n\n手算对照：暴击率 3.5% 记 `3.5/3.9 = 0.90` 分，爆伤 24.9% 记 `24.9/7.8 = 3.19` 分，攻击% 4.1% 记 `4.1/5.8 = 0.71` 分，合计 4.80 分。\n\n**没强化满的圣遗物给的是「当前分」，会标一个 \\*。**莫娜那边显示的是「强化满级的期望分」—— 它对低级圣遗物跑了一遍 DFS，搜索强化满级所有可能的结果取期望，那套搜索这里没做。"
+      },
+      {
+       "t": "field",
+       "index": 100
+      },
+      {
+       "t": "field",
+       "index": 101
+      },
+      {
+       "t": "field",
+       "index": 102
       }
      ]
     },
