@@ -404,6 +404,14 @@ textarea.ta-text { min-height: 220px; }
 /* ---- 「一行几个输入框」的列表控件（schema kind: "rows"） ---- */
 .rows { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .rows-list { display: flex; flex-direction: column; gap: 6px; }
+/* **这两条 [hidden] 必须有。** 上面 .rows-list 和下面的 .row 都设了
+   display:flex，作者样式优先级高于浏览器默认的 `[hidden] { display:none }`,
+   所以只写 `el.hidden = true` 是**藏不住的**，元素照样显示。
+   实测踩过：收起状态标签写着「展开 20 项」，21 行原样躺着。
+   这个项目在 .modal 上踩过同一个坑，这是第二次 —— 凡是给元素设了 display，
+   就顺手补一条 `[hidden]` 规则。 */
+.rows .rows-list[hidden] { display: none; }
+.rows .row[hidden] { display: none; }
 .rows .row { display: flex; align-items: center; gap: 6px; }
 .rows .row input {
   background: var(--input-bg, var(--card)); color: var(--text);
@@ -424,13 +432,18 @@ textarea.ta-text { min-height: 220px; }
 }
 .rows .row-del:hover { color: var(--danger); border-color: var(--danger); }
 .rows .row-add {
-  align-self: flex-start; cursor: pointer; font-size: 12.5px;
+  cursor: pointer; font-size: 12.5px;
   background: transparent; color: var(--accent);
   border: 1px dashed var(--border); border-radius: 7px; padding: 6px 12px;
 }
 .rows .row-add:hover { border-color: var(--accent); }
+/* 底部一行：左「添加」（常驻，收起时也在），右「展开/收起」 */
+.rows .rows-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+}
 .rows .row-toggle {
-  align-self: flex-start; cursor: pointer; font-size: 12.5px;
+  cursor: pointer; font-size: 12.5px;
   background: transparent; color: var(--text-2);
   border: 1px solid var(--border); border-radius: 7px; padding: 5px 12px;
 }

@@ -176,8 +176,10 @@ function makeArea(f) {
 function makeRows(f) {
   const sep = f.sep || "|";
   const parts = f.parts && f.parts.length ? f.parts : ["", ""];
-  // 超过这个条数就默认收起，免得一个 20 条的池子把页面拉得很长。
-  const COLLAPSE_OVER = 8;
+  // 超过这个条数才收起；收起时**只显示前 PREVIEW 项**（不是全藏起来）。
+  // 条目 ≤ PREVIEW 时本来就一眼看全，不收也不给按钮。
+  const COLLAPSE_OVER = 4;
+  const PREVIEW = 4;
   let collapsed = false;
   const wrap = document.createElement("div");
   wrap.className = "rows";
@@ -314,9 +316,24 @@ function makeRows(f) {
     const many = n > COLLAPSE_OVER;
     toggle.hidden = !many;
     toggle.textContent = collapsed ? "展开 " + n + " 项 ▾" : "收起 ▴";
-    // 条目掉回阈值以下时无论如何都要显示出来
-    list.hidden = many && collapsed;
-    add.hidden = many && collapsed;
+    // 收起时**只留前 PREVIEW 行**，剩下的行逐行藏起来 ——
+    // 不是把整个列表藏掉：留个开头，用户一眼能认出这是哪个池子。
+    //
+    // 注意：`.rows .row` 也有 display:flex，所以光设 el.hidden 同样无效，
+    // CSS 里必须补 `.rows .row[hidden] { display: none }`。
+    // 这条和 .rows-list[hidden] 是同一个坑（见 app.css 的注释）。
+    [...list.querySelectorAll(".row")].forEach((row, i) => {
+      row.hidden = many && collapsed && i >= PREVIEW;
+    });
+    // 尾部那个空行也算「第 N 项」之外，收起时一并藏掉，
+    // 免得看起来像第 5 条内容。「＋ 添加一行」在底栏，常驻不受影响。
+    if (many && collapsed) {
+      const last = list.lastElementChild;
+      if (last && ![...last.querySelectorAll("input")]
+                      .some((i) => i.value.trim())) {
+        last.hidden = true;
+      }
+    }
   };
   toggle.onclick = () => {
     collapsed = !collapsed;
@@ -327,9 +344,21 @@ function makeRows(f) {
   add.type = "button";
   add.className = "row-add";
   add.textContent = "＋ 添加一行";
-  add.onclick = () => { addRow([], true); };
+  add.onclick = () => {
+    // 收起状态下点添加：先展开，否则新行加在看不见的地方，用户会以为没反应。
+    if (collapsed) {
+      collapsed = false;
+      applyChrome();
+    }
+    addRow([], true);
+  };
 
-  wrap.append(toggle, list, add);
+  // 按钮排成一行放底部：左下「添加」（常驻），右下「展开/收起」。
+  const foot = document.createElement("div");
+  foot.className = "rows-foot";
+  foot.append(add, toggle);
+
+  wrap.append(list, foot);
   rebuild();
   wrap._sync = rebuild;
   return wrap;
