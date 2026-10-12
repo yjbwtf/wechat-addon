@@ -32,7 +32,7 @@ from .brain import Brain, BrainError, build_prompt
 from .config import CONFIG_PATH, ROOT, Config, load_config, load_persona
 from .drafts import DraftStore
 from .history import HistoryStore, StoredMessage
-from . import elevate, logkeep, meme_feed, model_preset
+from . import elevate, enka, logkeep, meme_feed, model_preset
 from .memes import MemeBook
 from .mood import MoodStore, parse_mood_tag
 from .policy import Gatekeeper, StopSwitch, make_msg_key
@@ -160,6 +160,8 @@ class Bot:
         self.store = HistoryStore(cfg.db_path, cfg.history)
         self.drafts = DraftStore(cfg.data_dir / "drafts" / "pending.jsonl")
         self.stop = StopSwitch(cfg.data_dir)
+        # Enka 查询的 ttl 缓存 + 调用配额（跨重启累计，见 src/enka.py）
+        self.enka_cache = enka.Cache(cfg.data_dir / "enka_cache.json")
         self.brain = Brain(cfg.dsh, cwd=cfg.data_dir / "agent-cwd")
         self.agg = Aggregator(cfg.aggregate)
         self.memes = MemeBook.load(cfg.memes, ROOT)
@@ -229,7 +231,8 @@ class Bot:
         action = self.gate.classify_command(
             self.gate.strip_secret(body),
             {"agent": self.cfg.agent.words, "shot": self.cfg.screenshot.words,
-             "launch": self.cfg.launch.words, "brush": self.cfg.brush.words},
+             "launch": self.cfg.launch.words, "brush": self.cfg.brush.words,
+             "enka": self.cfg.enka.words},
         )
 
         if not self.gate.authorize_command(msg.sender, msg.identity):
@@ -269,7 +272,8 @@ class Bot:
             logging.info("收到无法识别的指令：[%s] %s -> %r", msg.group, msg.sender, body[:30])
             words = self.gate.command_words(
                 {"agent": self.cfg.agent.words, "shot": self.cfg.screenshot.words,
-                 "launch": self.cfg.launch.words, "brush": self.cfg.brush.words})
+                 "launch": self.cfg.launch.words, "brush": self.cfg.brush.words,
+                 "enka": self.cfg.enka.words})
             try:
                 self.adapter.send(
                     msg.group,
@@ -311,6 +315,11 @@ class Bot:
             # 这条**不进后台线程**：它只是一次「让系统打开一个网址」，
             # 毫秒级返回，比开程序还快。走后台线程反而多一层队列。
             self.handle_brush(msg, body)
+            return True
+        elif action == "enka":
+            # 一次 HTTP，通常 1 秒内回来；走后台线程反而多一层队列。
+            # 慢的是网络，但 enka 模块自己有超时（默认 20 秒）。
+            self.handle_enka(msg, body)
             return True
         else:
             state = "暂停中" if (self.paused or self.stop.stopped) else "运行中"
@@ -639,6 +648,107 @@ class Bot:
             logging.error("打开 %s 失败：%s", url, exc)
             return False
 
+    def handle_public_command(self, msg: IncomingMessage, body: str) -> None:
+        """群友也能用的公开指令（当前只有 `/查询`）。
+
+        **刻意不走授权和口令** —— 群友不知道口令，而查的是本来就公开的展柜数据。
+        但它有三道约束，少任何一道都会变成被人刷的入口：
+
+          1. **只认白名单群**。控制指令那条路是故意不查白名单的（主人可以从
+             任何群停机器人），公开指令**不能**跟着沾这个光。
+          2. **必须 @ 过机器人**（在 public_command 里判）。
+          3. **暂停/急停期间不回复**。急停的语义是「什么都不发」，
+             公开指令也是回复，不该例外。
+
+        不认识的其他 `/xxx` 一律静默忽略 —— 免得这里变成一个开放聊天入口。
+        """
+        ok, reason = self.gate.prefilter(msg.group, msg.msg_key, is_bot=msg.is_bot)
+        if not ok:
+            logging.debug("公开指令丢弃 [%s/%s]：%s", msg.group, msg.sender, reason)
+            return
+        if self.paused or self.stop.stopped:
+            logging.info("已暂停，公开指令不回复：[%s] %s", msg.group, msg.sender)
+            return
+        # 用**严格**匹配，不用 classify_command 的模糊匹配：
+        # 那几级（包含 / 子序列）是给授权者打错字用的，公开指令面向全群，
+        # 宽匹配会把「/不是查询」也变成入口。
+        if self.gate.strict_command_kind(
+                body, {"enka": self.cfg.enka.words}) != "enka":
+            logging.info("不认识的公开指令，忽略：[%s] %s -> %r",
+                         msg.group, msg.sender, body[:30])
+            return
+        # 公开指令要算进每群每小时上限（否则群友可以拿它刷屏）
+        allowed, why = self.gate.limiter.check(msg.group)
+        if not allowed:
+            logging.info("公开指令被限流：[%s] %s", msg.group, why)
+            return
+        self.gate.limiter.commit(msg.group)
+        self.handle_enka(msg, body, public=True)
+
+    def handle_enka(self, msg: IncomingMessage, body: str,
+                    emit=None, *, public: bool = False) -> None:
+        """`\\uid [游戏] <UID>`：查米哈游账号的公开角色展柜。
+
+        **完全不碰 LLM** —— 一次 HTTP + 一段固定格式的文字。和 `\\开`、`\\刷课`
+        同一个思路：确定的事不要过模型（省一次调用，也省几十秒）。
+
+        配额和缓存都在 src/enka.py 里管，因为那是 Enka 作者定的规矩：
+        ttl 期间用缓存、两次查询之间有间隔、每小时有上限、不许枚举。
+        """
+        if emit is None:
+            emit = self._say
+        cfg = self.cfg.enka
+        if not cfg.enabled:
+            logging.info("UID 查询指令未开启")
+            return
+
+        arg = self.gate.strip_secret(self.gate.command_args(body)).strip()
+        if not arg:
+            # 指令词可能和参数连在一起写（「uid618285856」）
+            first = re.split(r"[\s,，。!！?？|]+",
+                             self.gate.strip_secret(body).strip())[0]
+            for w in sorted(cfg.words, key=len, reverse=True):
+                if first.lower().startswith(str(w).lower()):
+                    arg = first[len(str(w)):].strip()
+                    break
+            else:
+                arg = first
+
+        game = uid = None
+        if arg:
+            game, uid, err = enka.parse_args(arg)
+            if err:
+                emit(msg.group, err, split=False)
+                return
+        if uid is None:
+            # 没给 UID：用配好的默认值（一般是主人自己的号）
+            uid = cfg.default_uid
+            if not uid:
+                word = cfg.words[0]
+                if public:
+                    tip = ("给我一个 UID，例如：%s 原神 618285856\n"
+                           "游戏名可以写 原神 / 星铁 / 绝区零，也可以省略（自动认）。"
+                           % word)
+                else:
+                    tip = ("给我一个 UID，例如：%s 618285856\n"
+                           "（游戏可选，不写就自动认：%s hsr 618285856）"
+                           % (word, word))
+                emit(msg.group, tip, split=False)
+                return
+        if game is None and cfg.default_game:
+            game = enka.ALIASES.get(cfg.default_game, None)
+
+        try:
+            ok, text = enka.query(game, uid, cfg, self.enka_cache)
+        except Exception as exc:  # noqa: BLE001
+            # 查询本身不该把主循环带崩：网络库偶尔会抛些奇怪的东西
+            logging.exception("enka 查询异常：%s", exc)
+            emit(msg.group, "查询出错了，看日志。", split=False)
+            return
+        logging.warning("UID 查询 [%s] %s -> %s | %s",
+                        msg.group, msg.sender, uid, "成功" if ok else "失败")
+        emit(msg.group, text, split=False)
+
     def handle_launch(self, msg: IncomingMessage, body: str,
                       emit=None) -> None:
         """`\\开 <程序>`：启动一个预授权的程序（需要管理员权限的那些）。
@@ -784,6 +894,13 @@ class Bot:
         # 指令优先于一切过滤：不需要 @，也不受"是否暂停"影响，
         # 否则一旦暂停就再也收不到 \\start 了。
         if not msg.is_bot:
+            # 公开指令优先：它用的是另一套前缀（`/`），且**不走授权和口令** ——
+            # 群友也能查，见 Gatekeeper.public_command 的说明。
+            pub = self.gate.public_command(msg.group, msg.content)
+            if pub is not None:
+                self.handle_public_command(msg, pub)
+                return
+
             trusted = self.gate.is_trusted_chat(msg.group)
             body = self.gate.as_command(msg.content, trusted=trusted)
             if body is not None:

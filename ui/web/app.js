@@ -364,6 +364,34 @@ function makeRows(f) {
   return wrap;
 }
 
+// 说明文字里允许 `**粗体**` 和 `` `代码` `` 两种写法。
+//
+// 为什么需要：界面原来是 `el.textContent = hint` —— 纯文本，**不解析任何
+// 标记**。于是 schema 里早就写着的 40 处 `**` 全都是原样显示出来的，
+// 看着像噪声（这个是我做账号查询那页时截图才发现的）。
+//
+// 安全：**用 createElement + textContent 拼，绝不走 innerHTML**。
+// 这些文字来自 config/schema，是用户可编辑的文件，不能当 HTML 解析。
+const RICH_RE = /(\*\*[^*\n]+\*\*|`[^`\n]+`)/g;
+
+function richText(el, text) {
+  const parts = String(text ?? "").split(RICH_RE);
+  for (const p of parts) {
+    if (!p) continue;
+    if (p.length > 4 && p.startsWith("**") && p.endsWith("**")) {
+      const b = document.createElement("b");
+      b.textContent = p.slice(2, -2);
+      el.appendChild(b);
+    } else if (p.length > 2 && p.startsWith("`") && p.endsWith("`")) {
+      const c = document.createElement("code");
+      c.textContent = p.slice(1, -1);
+      el.appendChild(c);
+    } else {
+      el.appendChild(document.createTextNode(p));
+    }
+  }
+}
+
 function makeField(f) {
   const card = document.createElement("div");
   card.className = "card";
@@ -378,7 +406,7 @@ function makeField(f) {
   lab.textContent = f.label;
   const hint = document.createElement("div");
   hint.className = "card-hint";
-  hint.textContent = f.hint || "";
+  richText(hint, f.hint);
   text.append(lab, hint);
 
   const ctl = document.createElement("div");
@@ -442,7 +470,7 @@ function renderFieldBlock(items, host) {
       } else if (it.t === "note") {
         const n = document.createElement("div");
         n.className = "sec-note";
-        n.textContent = it.text;
+        richText(n, it.text);
         host.appendChild(n);
       } else if (it.t === "button") {
         const a = SCHEMA.actions[it.index];

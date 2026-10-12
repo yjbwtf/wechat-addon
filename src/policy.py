@@ -261,6 +261,43 @@ class Gatekeeper:
             return None
         return content[index + len(cfg.prefix):].strip()
 
+    def public_command(self, group: str, content: str) -> str | None:
+        """群里的**公开指令**：`@机器人 /查询 原神 618285856`。返回指令正文。
+
+        和 `as_command()` 是两条完全不同的路，别混淆：
+
+        | | `as_command`（控制指令） | `public_command`（公开指令） |
+        |---|---|---|
+        | 前缀 | 群 `\\` / 私聊 `/`（只认开头） | `enka.prefix`（默认 `/`） |
+        | 谁能用 | 授权名单 + 口令 | **群里任何人** |
+        | 白名单群 | **不检查**（主人可从任何群控制） | **必须检查**（在 main 里，走 prefilter） |
+        | 内容 | 停/继续/重启/截图/agent… | 只有查账号这一件事 |
+
+        为什么群里的公开指令要另立前缀：`\\` 开头的一律要口令，而群友不知道
+        口令；把查询混进 `\\` 体系就得给群友发口令，等于口令全群公开。
+
+        **@ 是硬要求**（`require_at` 生效时）：没有 @ 就不当指令，免得群里
+        正常聊到「/」开头的网址、路径、分数时被误触发。
+        """
+        cfg = self.cfg
+        if not cfg.commands.enabled or not cfg.enka.enabled:
+            return None
+        if not cfg.enka.allow_group_members:
+            return None
+        prefix = (cfg.enka.prefix or "").strip()
+        if not prefix:
+            return None
+
+        text, mentioned = self.mention(content)
+        trusted = self.is_trusted_chat(group)
+        if cfg.require_at and not mentioned and not trusted:
+            return None
+        text = (text or "").lstrip()
+        # 只认开头：`/` 在正常句子里太常见（路径、网址、分数）
+        if not text.startswith(prefix):
+            return None
+        return text[len(prefix):].strip()
+
     def is_trusted_chat(self, group: str) -> bool:
         """这个会话是不是「可信会话」（免 @、免口令）。
 
@@ -378,6 +415,34 @@ class Gatekeeper:
             label = self.ACTION_LABEL.get(name)
             parts.append(f"{head}（{label}）" if label else head)
         return "、".join(parts)
+
+    def strict_command_kind(self, body: str,
+                            words: dict[str, list[str]]) -> str | None:
+        """**严格**归类：第一个词必须等于指令词、或者以它开头。
+
+        和 `classify_command` 的区别就是**不做包含/子序列匹配**：
+
+        | 写法 | classify_command | strict_command_kind |
+        |---|---|---|
+        | `查询 原神 123` | enka | enka |
+        | `查询一下 原神 123` | enka | enka |
+        | `不是查询`    | **enka**（包含） | None |
+        | `查一下`      | None | None |
+
+        为什么公开指令必须用这个：`classify_command` 的宽匹配是给**授权者**
+        打错字用的（`\\桌面截图给我` 要能认出来），而那条路上有口令和授权名单
+        兜着。公开指令面向全群、无口令 —— 宽匹配等于把「/随便说点什么」
+        也变成入口。
+        """
+        first = re.split(r"[\s,，。!！?？|]+", (body or "").strip().lower())[0]
+        if not first:
+            return None
+        for name, lst in (words or {}).items():
+            for w in sorted((str(x).strip().lower() for x in (lst or [])),
+                            key=len, reverse=True):
+                if w and (first == w or first.startswith(w)):
+                    return name
+        return None
 
     def command_args(self, body: str) -> str:
         """取指令词后面的参数部分，例如「梗 add ccb | 踩踩背」-> 「add ccb | 踩踩背」。"""

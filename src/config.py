@@ -143,6 +143,40 @@ class BrushConfig:
 
 
 @dataclass
+class EnkaConfig:
+    """`\\uid [游戏] <UID>`：查米哈游账号的**公开角色展柜**（Enka.Network）。
+
+    **不走 LLM。** 确定的事一次 HTTP 就够了 —— 和 `\\开` / `\\刷课` 同一个思路：
+    走 agent 要多花一次模型调用、几十秒，而且 agent 没法遵守这个 API 的规矩。
+
+    Enka 的作者在文档里写了几条硬规矩，配置项就是照着它设的：
+      · 不许枚举 UID、不许批量查 —— 所以没有「遍历」这类东西
+      · 必须带自定义 User-Agent（写死在 src/enka.py 里）
+      · UID 端点有动态限流 —— 所以有 min_interval_seconds / max_per_hour
+      · 响应里的 ttl 期间要用本地缓存 —— 所以有 data/enka_cache.json
+    """
+
+    enabled: bool = True
+    words: list[str] = field(default_factory=lambda: ["查询", "uid", "查询uid", "战绩"])
+    #: 群友能不能用。True = 群里 `@机器人 /查询 原神 618285856` 直接能查，
+    #: **不需要口令、也不看授权名单**。原因是这个 API 的数据本来就是公开的，
+    #: 而群友根本不知道口令。关掉之后只有授权者能用 `\\uid`。
+    allow_group_members: bool = True
+    #: 公开指令的前缀。**刻意和群控制指令的 `\\` 分开**：
+    #: `\` 开头一律要授权 + 口令，`/` 开头是「谁都能问的公开查询」。
+    prefix: str = "/"
+    #: `\\uid` 不带参数时查谁（填你自己的 UID 就不用每次打）
+    default_uid: str = ""
+    #: 默认游戏。auto = 自动识别（按 gi -> hsr -> zzz 依次试）
+    default_game: str = "auto"
+    timeout_seconds: int = 20
+    #: 两次查询之间至少隔多久。**按「一次用户查询」算**，不是按内部尝试算
+    min_interval_seconds: float = 3.0
+    #: 每小时最多发几次真实请求（跨重启累计）
+    max_per_hour: int = 60
+
+
+@dataclass
 class LogsConfig:
     """日志的定期清理。
 
@@ -386,6 +420,7 @@ class Config:
     memes_update: AutoUpdateConfig
     launch: LaunchConfig
     brush: BrushConfig
+    enka: EnkaConfig
     poll: PollConfig
     logs: LogsConfig
     threads: ThreadConfig
@@ -586,6 +621,20 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         courses=parse_courses(br_raw.get("courses")),
     )
 
+    en_raw = _section(raw, "enka")
+    enka = EnkaConfig(
+        enabled=bool(en_raw.get("enabled", True)),
+        words=[str(w) for w in
+               (en_raw.get("words") or ["查询", "uid", "查询uid", "战绩"])],
+        allow_group_members=bool(en_raw.get("allow_group_members", True)),
+        prefix=str(en_raw.get("prefix", "/") or "/"),
+        default_uid=str(en_raw.get("default_uid", "") or "").strip(),
+        default_game=str(en_raw.get("default_game", "auto") or "auto").strip().lower(),
+        timeout_seconds=int(en_raw.get("timeout_seconds", 20)),
+        min_interval_seconds=float(en_raw.get("min_interval_seconds", 3) or 0),
+        max_per_hour=max(0, int(en_raw.get("max_per_hour", 60) or 0)),
+    )
+
     mu_raw = _section(raw, "memes_update")
     memes_update = AutoUpdateConfig(
         enabled=bool(mu_raw.get("enabled", True)),
@@ -698,6 +747,7 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         memes_update=memes_update,
         launch=launch,
         brush=brush,
+        enka=enka,
         poll=poll,
         logs=logs,
         threads=threads,

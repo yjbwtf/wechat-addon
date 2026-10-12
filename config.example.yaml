@@ -455,3 +455,28 @@ brush:
   courses: []
   #   - 舞台人生 | https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/studentcourse?courseid=...
 
+# 账号查询：查米哈游账号的公开角色展柜（Enka.Network）。
+# **不走 AI** —— 一次 HTTP + 一段固定文字，秒回、零 token。
+#
+#   群友用（公开指令，不要口令、不看授权名单）：
+#     @机器人 /查询 原神 618285856
+#     @机器人 /查询 618285856          游戏名可省略，自动认
+#   授权者用（控制指令，要口令）：
+#     \uid 618285856 / \uid hsr 618285856 / \uid
+#
+# 前缀 `/` 是**刻意**和群控制指令的 `\` 分开的：`\` 开头一律要口令，
+# 而群友不知道口令。公开指令必须 @、只认白名单群、暂停时不回复。
+# 看不到背包、原石、抽卡记录 —— Enka 只能拿到游戏里「展柜」公开的那部分。
+# 作者定的规矩（别改坏）：不许枚举 UID、必须带自定义 UA、要有间隔和上限、
+# ttl 期间走本地缓存。这些在 src/enka.py 里实现。
+enka:
+  enabled: true
+  allow_group_members: true    # 群友能不能用 @机器人 /查询
+  prefix: '/'
+  words: ["查询", "uid", "查询uid", "战绩"]
+  default_uid: ''        # 不带参数时查这个 UID
+  default_game: auto     # auto = 自动识别；也可填 gi / hsr / zzz
+  timeout_seconds: 20
+  min_interval_seconds: 3
+  max_per_hour: 60
+

@@ -1153,6 +1153,122 @@
    "on": null,
    "off": null,
    "page": "owner"
+  },
+  {
+   "index": 91,
+   "key": "config:enka.enabled",
+   "label": "启用账号查询",
+   "hint": "关掉之后 \\uid 和群友的 /查询 都不再用。不影响别的功能。",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "api"
+  },
+  {
+   "index": 92,
+   "key": "config:enka.allow_group_members",
+   "label": "允许群友查询",
+   "hint": "开启后群友发 `@机器人 /查询 原神 618285856` 就能查，**不需要口令、也不看授权名单**。只认白名单群，并且必须 @ 机器人。\n关掉之后只有授权者能用 \\uid。",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "api"
+  },
+  {
+   "index": 93,
+   "key": "config:enka.prefix",
+   "label": "公开指令前缀",
+   "hint": "群友那条指令的开头，默认 `/`。\n**刻意和群控制指令的 `\\` 分开**：`\\` 开头一律要口令，而群友不知道口令。",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api"
+  },
+  {
+   "index": 94,
+   "key": "config:enka.words",
+   "label": "触发词",
+   "hint": "群友和授权者都能用的说法。默认「查询」。",
+   "kind": "rows",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api",
+   "parts": [
+    "触发词"
+   ]
+  },
+  {
+   "index": 95,
+   "key": "config:enka.default_uid",
+   "label": "默认 UID",
+   "hint": "不带 UID 时查谁。填你自己的就不用每次都打。留空 = 每次都要给 UID。",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api"
+  },
+  {
+   "index": 96,
+   "key": "config:enka.default_game",
+   "label": "默认游戏",
+   "hint": "auto = 自动认（依次试 原神→星铁→绝区零，第一次查会多发两次请求）。",
+   "kind": "choice",
+   "wire": "choice",
+   "options": [
+    "auto",
+    "gi",
+    "hsr",
+    "zzz"
+   ],
+   "on": null,
+   "off": null,
+   "page": "api"
+  },
+  {
+   "index": 97,
+   "key": "config:enka.timeout_seconds",
+   "label": "查询超时（秒）",
+   "hint": "单次请求等多久。网络差就调大。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api"
+  },
+  {
+   "index": 98,
+   "key": "config:enka.min_interval_seconds",
+   "label": "两次查询最小间隔（秒）",
+   "hint": "按**一次用户查询**算，不是按内部请求算。Enka 的作者要求别打太快。",
+   "kind": "float",
+   "wire": "float",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api"
+  },
+  {
+   "index": 99,
+   "key": "config:enka.max_per_hour",
+   "label": "每小时上限",
+   "hint": "每小时最多几次真实请求。跨机器人重启累计。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api"
   }
  ],
  "pages": [
@@ -1685,11 +1801,63 @@
    "items": [
     {
      "t": "head",
-     "text": "功能性 API 接入"
+     "text": "米哈游账号查询（Enka.Network）"
     },
     {
      "t": "note",
-     "text": "这块是**占位**，目前没有任何配置项。\n\n规划中放「让机器人接第三方能力」的开关：天气、翻译、图片生成、外部搜索之类。现阶段这些能力都走 DSH 的联网搜索工具，没有单独的 API 要配。\n\n真要加的时候：先在 config.yaml 里加一段、在 src/ 里实现，再把字段补进 ui/schema.json 的这一页 —— 界面本身不用改。"
+     "text": "查的是游戏里**「展柜」公开的那部分**：昵称、等级、成就、展柜里的角色和命座。看不到背包、原石、抽卡记录 —— Enka 拿不到这些数据。\n\n**不走 AI**：一次 HTTP + 一段固定文字，秒回、零 token。\n\n群友用法：`@机器人 /查询 原神 618285856`\n游戏名可以写 原神 / 星铁 / 绝区零，也可以省略（自动认）。"
+    },
+    {
+     "t": "field",
+     "index": 91
+    },
+    {
+     "t": "field",
+     "index": 92
+    },
+    {
+     "t": "field",
+     "index": 93
+    },
+    {
+     "t": "field",
+     "index": 94
+    },
+    {
+     "t": "field",
+     "index": 95
+    },
+    {
+     "t": "field",
+     "index": 96
+    },
+    {
+     "t": "head",
+     "text": "频率与超时"
+    },
+    {
+     "t": "note",
+     "text": "Enka 的作者在文档里写了几条硬规矩，这几项就是照着它设的：不许枚举 UID、不许批量查、必须带自定义 User-Agent、要有调用间隔和上限、响应里的 ttl 秒数内要用本地缓存。\n\n缓存文件在 data\\enka_cache.json，删掉只会让下一次查询真的去打一次接口，没有别的副作用。"
+    },
+    {
+     "t": "field",
+     "index": 97
+    },
+    {
+     "t": "field",
+     "index": 98
+    },
+    {
+     "t": "field",
+     "index": 99
+    },
+    {
+     "t": "head",
+     "text": "这个大类是干什么的"
+    },
+    {
+     "t": "note",
+     "text": "「功能性API接入」是给**接第三方能力**留的位置。现在这里有账号查询；以后再加天气、翻译、图片生成之类，也放这一页。\n\n加新东西的做法：先在 config.yaml 里加一段、在 src/ 里实现，再把字段补进 ui/schema.json 的这一页 —— 界面本身不用改。"
     }
    ],
    "title": "功能性API接入"

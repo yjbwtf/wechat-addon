@@ -240,6 +240,13 @@ html, body {
 .sec-note {
   font-size: 12.5px; color: var(--text-3); margin: 0 0 10px;
   max-width: 70ch;
+  /* 说明文字里的换行要保留：原来没有 pre-wrap，多段说明会被压成一大坨，
+     `\n\n` 直接消失（做账号查询那页时发现的）。 */
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.sec-note code {
+  background: color-mix(in srgb, var(--text-3) 18%, transparent);
+  padding: 0 4px; border-radius: 4px; font-size: 12px;
 }
 
 .card {
@@ -258,7 +265,8 @@ html, body {
 .card-hint {
   font-size: 12.5px; color: var(--text-3); margin-top: 2px;
   /* 说明文字整段显示 —— 原来自绘界面用单行省略号截断，看不全 */
-  white-space: normal; overflow-wrap: anywhere;
+  /* pre-wrap：作者写的换行是有意的（分点说明），别压成一段 */
+  white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .card-hint code {
   background: color-mix(in srgb, var(--text-3) 18%, transparent);
