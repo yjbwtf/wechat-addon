@@ -1439,15 +1439,28 @@ profile 是那时候重新组合的。机器人每分钟检查一次 `config.yam
 
 ### 怎么自己验（不花钱、不要 Key）
 
-`data\_fake_llm.py` 是个本机假模型服务，`data\model-zhipu.yml` 是同样结构、
-只把端点指向它的叠加层。跑：
+思路是**把叠加层的端点指向一个本机的假模型服务**，这样不用任何 Key 就能验证
+「档位 → 参数 → 路由」整条链，还能把发出去的请求体抓下来看。
 
-    venv\Scripts\python.exe data\_fake_llm.py          # 一个窗口
-    venv\Scripts\python.exe data\_e2e_preset.py        # 另一个窗口
+这三个文件都在 `data\`（**gitignore 的，不在仓库里**，属于本机的调试脚手架）：
 
-就能看到请求真的走了另一条路由，而且请求体里的 `tools` 有三个
-（`web_search` / `web_fetch` / `exit_plan_mode`）—— 这是「换了模型也还有搜索能力」
-的证据。（`data\` 是 gitignore 的，这两个文件只在本机。）
+| 文件 | 作用 |
+|---|---|
+| `data\_fake_llm.py` | 假的 OpenAI 兼容服务，把请求体写进 `_fake_llm_requests.jsonl` |
+| `data\model-zhipu.yml` | 和 `dsh\model-zhipu.yml` 同结构，只把 `baseURL` 指向假服务 |
+| `data\_e2e_preset.py` | 用 `preset_dir=data` 调一次真的 `Brain.ask()` |
+
+跑法（一个窗口一个）：
+
+    venv\Scripts\python.exe data\_fake_llm.py
+    venv\Scripts\python.exe data\_e2e_preset.py
+
+请求体会落到 `data\_fake_llm_requests.jsonl`，能看到路由确实换了，而且
+`tools` 有三个（`web_search` / `web_fetch` / `exit_plan_mode`）——
+这是「换了模型也还有搜索能力」的证据。
+
+> 别人 clone 这个仓库是**没有**这三个文件的。要复现就照上表自己写一份，
+> 加起来不到 120 行。
 
 ---
 
