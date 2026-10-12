@@ -77,8 +77,10 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" 
     $p = $_
     if ($p.ProcessId -eq $me) { return }
     $hit = $false
-    if ($p.ExecutablePath -and $p.ExecutablePath.StartsWith($root, 'OrdinalIgnoreCase')) { $hit = $true }
-    if (-not $hit -and $p.CommandLine -and $p.CommandLine -match '-m\s+src\.main') { $hit = $true }
+    if ($p.CommandLine -and $p.CommandLine -match '-m\s+src\.main') { $hit = $true }
+    if (-not $hit -and $p.ExecutablePath -and $p.ExecutablePath.StartsWith($root, 'OrdinalIgnoreCase')) {
+      if (-not ($p.CommandLine -and $p.CommandLine -match 'ui_app\.py')) { $hit = $true }
+    }
     if ($hit) {
       $killed += $p.ProcessId
       Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
