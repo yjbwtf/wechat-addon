@@ -157,10 +157,120 @@ function makeArea(f) {
   return el;
 }
 
+/* 「一行一个输入框」的列表控件（schema kind: "rows"）。
+ *
+ * 为什么单独做一个：课程表这种「名字 + 网址」的成对数据，塞进一个文本域
+ * 要用户自己写竖线分隔符，打错了还不报错，只是匹配不到 —— 很难查。
+ *
+ * **存储格式没变**：仍然是 wire: "list" 那种「一行一项、用 sep 分隔」的
+ * 字符串。这个控件只在渲染层把每一行拆成几个输入框，读写走的还是同一套
+ * VALUES[f.key] 字符串。所以后端一行都不用改，schema 里也不用加新类型。
+ *
+ * 行为（按用户要的）：
+ *   - 点「＋」加一个空行，光标自动落在第一个框
+ *   - **全空的行在焦点离开后自己消失**，不用手动删
+ *   - 删除是等焦点真的离开**整行**才做 —— 否则从名字框 Tab 到网址框时
+ *     那一行会在中途被删掉（焦点离开单个输入框也会触发 blur）
+ *   - 一开始就有一个空行，打开就能直接打字
+ */
+function makeRows(f) {
+  const sep = f.sep || "|";
+  const parts = f.parts && f.parts.length ? f.parts : ["", ""];
+  const wrap = document.createElement("div");
+  wrap.className = "rows";
+  const list = document.createElement("div");
+  list.className = "rows-list";
+
+  const parse = (text) => String(text ?? "").split("\n")
+    .map((s) => s.trim()).filter(Boolean)
+    .map((line) => {
+      const cells = new Array(parts.length).fill("");
+      let rest = line;
+      // 前 n-1 个按分隔符切，最后一段整段收下 ——
+      // 这样网址里万一有分隔符也不会被切坏
+      for (let i = 0; i < parts.length - 1; i++) {
+        const k = rest.indexOf(sep);
+        if (k < 0) break;
+        cells[i] = rest.slice(0, k).trim();
+        rest = rest.slice(k + sep.length);
+      }
+      cells[parts.length - 1] = rest.trim();
+      return cells;
+    });
+
+  // 只更新值，**不删行**。打字途中一个行可能暂时是空的，
+  // 这时候把它删掉等于把用户正在编辑的东西吃掉。
+  const writeBack = () => {
+    const lines = [...list.querySelectorAll(".row")]
+      .map((row) => [...row.querySelectorAll("input")].map((i) => i.value.trim()))
+      .filter((cells) => cells.some((c) => c))
+      .map((cells) => cells.join(" " + sep + " "));
+    VALUES[f.key] = lines.join("\n");
+    refreshDirty();
+  };
+
+  const addRow = (cells = [], focus = false) => {
+    const row = document.createElement("div");
+    row.className = "row";
+    parts.forEach((label, i) => {
+      const box = document.createElement("input");
+      box.type = "text";
+      box.placeholder = label;
+      box.value = cells[i] || "";
+      box.oninput = writeBack;
+      row.appendChild(box);
+    });
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "row-del";
+    del.title = "删掉这一行";
+    del.textContent = "✕";
+    del.onclick = () => { row.remove(); writeBack(); };
+    row.appendChild(del);
+
+    row.addEventListener("focusout", () => {
+      // 延迟一拍：焦点可能只是从这一行的第一个框移到第二个框，
+      // 那一刻 relatedTarget 还在行内，不该删。
+      setTimeout(() => {
+        if (row.contains(document.activeElement)) return;
+        const empty = [...row.querySelectorAll("input")]
+          .every((i) => !i.value.trim());
+        if (empty) { row.remove(); writeBack(); }
+      }, 0);
+    });
+
+    list.appendChild(row);
+    if (focus) {
+      const first = row.querySelector("input");
+      if (first) first.focus();
+    }
+    return row;
+  };
+
+  const rebuild = () => {
+    list.innerHTML = "";
+    const rows = parse(VALUES[f.key]);
+    rows.forEach((cells) => addRow(cells));
+    // 空表时留一个空行，打开就能打字；有内容也留一个，方便接着加
+    addRow([]);
+  };
+
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "row-add";
+  add.textContent = "＋ 添加一行";
+  add.onclick = () => { addRow([], true); };
+
+  wrap.append(list, add);
+  rebuild();
+  wrap._sync = rebuild;
+  return wrap;
+}
+
 function makeField(f) {
   const card = document.createElement("div");
   card.className = "card";
-  const wide = (f.kind === "list" || f.kind === "text");
+  const wide = (f.kind === "list" || f.kind === "text" || f.kind === "rows");
   if (wide) card.classList.add("wide");
   if (f.key.includes("agent.enabled")) card.classList.add("danger");
 
@@ -184,6 +294,7 @@ function makeField(f) {
   if (f.kind === "bool") widget = useSwitch ? makeSwitch(f) : makeSeg(f);
   else if (f.kind === "choice") widget = makeSeg(f);
   else if (f.kind === "list" || f.kind === "text") widget = makeArea(f);
+  else if (f.kind === "rows") widget = makeRows(f);
   else widget = makeInput(f);
 
   ctl.appendChild(widget);

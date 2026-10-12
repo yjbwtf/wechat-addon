@@ -447,8 +447,9 @@ brush:
   enabled: true
   words: ["刷课", "上课", "挂课"]
   browser: ''          # 留空 = 用系统默认浏览器
-  # 课程表。**设置界面「权限」页里也能改**（一行一门课）。
-  # 两种写法都认：`名字 | 网址`（界面用的）或 {name:…, url:…}（手写用）。
+  # 课程表。**在设置界面「权限」页里填更方便**：一行一门课，两个输入框
+  # （课程名 / 网址）+「＋ 添加一行」，空行会自动消失。
+  # 这里两种写法都认：`名字 | 网址` 或 {name:…, url:…}。
   courses: []
   #   - 舞台人生 | https://mooc2-ans.chaoxing.com/mooc2-ans/mycourse/studentcourse?courseid=...
 

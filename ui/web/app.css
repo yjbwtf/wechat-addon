@@ -401,6 +401,35 @@ textarea.ta-text { min-height: 220px; }
 }
 .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 2px; }
 
+/* ---- 「一行几个输入框」的列表控件（schema kind: "rows"） ---- */
+.rows { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.rows-list { display: flex; flex-direction: column; gap: 6px; }
+.rows .row { display: flex; align-items: center; gap: 6px; }
+.rows .row input {
+  background: var(--input-bg, var(--card)); color: var(--text);
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 7px 10px; font-size: 13px; font-family: inherit; min-width: 0;
+}
+.rows .row input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+/* 前面的是「名字」这类短字段，最后一个是网址这种长字段 */
+.rows .row input { flex: 1 1 0; }
+.rows .row input:last-of-type { flex: 3 1 0; font-family: "Cascadia Mono", Consolas, monospace; }
+.rows .row-del {
+  flex: 0 0 auto; width: 28px; height: 28px; padding: 0; cursor: pointer;
+  background: transparent; color: var(--text-3);
+  border: 1px solid var(--border); border-radius: 7px; font-size: 12px;
+}
+.rows .row-del:hover { color: var(--danger); border-color: var(--danger); }
+.rows .row-add {
+  align-self: flex-start; cursor: pointer; font-size: 12.5px;
+  background: transparent; color: var(--accent);
+  border: 1px dashed var(--border); border-radius: 7px; padding: 6px 12px;
+}
+.rows .row-add:hover { border-color: var(--accent); }
+
 /* ---------------------------------------------------------------- 提示 */
 .toast-wrap {
   position: fixed; right: 20px; bottom: 20px;

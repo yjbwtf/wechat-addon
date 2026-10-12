@@ -1108,9 +1108,14 @@
    "index": 90,
    "key": "config:brush.courses",
    "label": "课程表",
-   "hint": "一行一门课，格式：课程名 | 网址。例：舞台人生 | https://mooc2-ans.chaoxing.com/... 名字用 Substring 匹配，「刷课 舞台」能命中「舞台人生」。网址从这里取：在自己浏览器里打开课程页，复制地址栏。注意地址里带 t= / stuenc= 这类会话参数的话会过期，重登后要更新。",
-   "kind": "list",
+   "hint": "一行一门课：左边填课程名，右边填网址。名字用 Substring 匹配，「刷课 舞台」能命中「舞台人生」。网址从这里取：在自己浏览器里打开课程页，复制地址栏。注意地址里带 t= / stuenc= 这类会话参数的话会过期，重登后要更新。空行会自动消失。",
+   "kind": "rows",
    "wire": "list",
+   "sep": "|",
+   "parts": [
+    "课程名",
+    "网址"
+   ],
    "options": null,
    "on": null,
    "off": null,
