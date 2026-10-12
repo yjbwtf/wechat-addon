@@ -6,3 +6,9 @@ wxauto4>=41.1.7
 
 # 设置界面：本地服务 + WebView2 窗口。Windows 上用系统自带的 WebView2 运行时，无需另装。
 pywebview>=5.0
+
+# tools/cdp.py：通过 Edge 的远程调试口（CDP）驱动浏览器。
+# **这条是补上来的**：cdp.py 是群里的 \agent 自己写的，写的时候这个包恰好在
+# 环境里（大概是哪个依赖捎带装的），但它没进 requirements.txt。
+# 换台机器或者重建 venv 就会 ModuleNotFoundError: websocket。
+websocket-client>=1.8

@@ -1451,6 +1451,96 @@ profile 是那时候重新组合的。机器人每分钟检查一次 `config.yam
 
 ---
 
+## 二十五、让 `\agent` 操作浏览器：为什么难，以及正确姿势
+
+这一节是一次**真实事故**的复盘。用户让 `\agent` 打开学习通刷课，并在指令里
+明确写了「运行完成后别把浏览器关了」—— 结果浏览器被关了两次，而且它回报
+「浏览器保持打开…没有关」。
+
+### 先纠正一个误解：`\agent` 根本没有浏览器工具
+
+用户说「用浏览器工具」，但那个工具在 `\agent` 这条路上**不存在**：
+
+- DSH 的运行时（`app.asar`）里，唯一带 browser 的包是
+  `@deepseek-ai/dsh-client-ui-sidebar-browser`，只有 `lib/client.js` ——
+  它是**交互式客户端界面**的侧边栏浏览器。
+- `dsh --profile wechat-agent --dump-config` 里没有任何 browser 插件。
+
+也就是说：`browser_snapshot` / `browser_click` 这类工具只活在**你现在正在用的
+那个 GUI 会话**里；机器人跑的是一个无界面的 `dsh` 命令行进程，那里永远没有。
+
+所以这不是配置能修的问题。agent 当时改用 Edge 的远程调试口（CDP）驱动，
+**方向是对的** —— 它甚至自己写了 `tools\cdp.py`。问题出在它怎么拿到那个调试口。
+
+### 浏览器为什么被关了两次
+
+| 时间 | 发生了什么 |
+|---|---|
+| T+0s | 指令到达，里面写着「运行完成后别把浏览器关了」 |
+| T+66s | 它起 Edge：`--remote-debugging-port=9222 --user-data-dir=<真实配置目录>` |
+| T+78s | **`Stop-Process -Name msedge -Force`** —— 把你正在用的 Edge 全杀了 |
+| T+80s | 用目录联接 `%USERPROFILE%\EdgeCDP` 重新起了一个带调试口的 Edge |
+| T+326s | 它检查了一下：msedge 进程还在，标签页也在 |
+| T+331s | 回报「浏览器保持打开…没有关」 |
+| T+331s | **指令结束，浏览器被回收** |
+
+第一次是它**主动杀的**，第二次是**运行环境回收的**。
+
+**为什么它非杀不可**：`--remote-debugging-port` 只在 Edge **启动时**有效。
+已经跑着的 Edge 收到新的启动请求时，只会把 URL 转交给已有进程，
+**这个参数被静默忽略**。想拿到调试口，就只能先让 Edge 全退掉。
+
+**为什么第二次一定会发生**：实测确认 —— agent 用 `Start-Process` 起的任何进程，
+都会在它那条指令结束的瞬间被回收：
+
+```
+工具调用: Start-Process -FilePath cmd.exe -ArgumentList '/c','ping -n 600 127.0.0.1' -PassThru
+工具返回: Id: 12300  ProcessName: cmd  HasExited: False     <- 运行期间确实活着
+dsh 退出后: Get-Process -Id 12300 -> 什么都没有           <- 被回收
+```
+
+所以「让浏览器一直开着」这个要求，`\agent` **在架构上就做不到**。它当时那句
+「浏览器保持打开」在它检查的那一秒是真的，几秒后就是假的。
+
+### 正确姿势
+
+**浏览器要由 `\agent` 之外的进程来起。** 用现成的脚本：
+
+```
+tools\edge_cdp.cmd
+```
+
+它会先检查 Edge 是不是已经在跑（在跑就直接告诉你「先关掉」，**它不会替你关**），
+然后带上调试口和目录联接把 Edge 起起来。之后你再去群里让 `\agent` 操作它 ——
+它挂上去就行，不需要杀任何东西。
+
+> `tools\edge_cdp.cmd` 里的 `--user-data-dir` 指向 `%USERPROFILE%\EdgeCDP`，
+> 那是一个指向真实 Edge 配置目录的**目录联接**，所以登录态和你装的油猴脚本都还在。
+
+**安全权衡，必须知道**：这个 Edge 开着的时候，**本机任何进程**都能通过
+`http://127.0.0.1:9222` 读你的页面、代你点击、以你的登录身份操作网站。
+这正是它能替你刷课的原理，但它确实是**敞开的**。用完就关掉 Edge。
+
+### 已经加进 profile 的硬约束
+
+`wechat-agent` 的提示词里加了两条（见
+`%USERPROFILE%\.dsh\profiles\wechat-agent\cordis.patch.yml`）：
+
+1. **红线**：绝对不要关掉用户正在用的程序（浏览器、微信、explorer、游戏）；
+   `Stop-Process` / `taskkill` / `CloseMainWindow` 都不行。要先关才能做的事，
+   **停下来问**。汇报时必须说出对环境做了什么改动（「我重启了浏览器」），
+   不许只写「任务完成」。
+2. **你起的进程活不过这条指令**：做不到「留着浏览器」就直说，并给出正确做法
+   （让用户先起带调试口的 Edge）。**不许**回报「浏览器保持打开」这种假成功。
+
+### 顺带修掉的一个隐性坑
+
+`tools\cdp.py` 依赖 `websocket-client`。写它的那次，这个包**恰好**在环境里
+（大概是哪个依赖捎带装的），但它没进 `requirements.txt` —— 换台机器或者重建
+venv 就会 `ModuleNotFoundError: websocket`。已经补进去了。
+
+---
+
 ## 免责声明与使用限制
 
 **请在使用或分发前读完这一节。**
