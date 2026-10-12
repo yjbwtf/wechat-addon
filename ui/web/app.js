@@ -303,6 +303,8 @@ function renderStatusPage(host) {
     b.className = "btn" + (a && a.primary ? " primary" : "") +
                   (a && a.danger ? " danger" : "");
     b.textContent = label;
+    // 实时刷新要靠这个 data-action 找到按钮，改可用状态。
+    b.dataset.action = label;
     b.disabled = (label === "启动机器人" && SCHEMA_STATE.running) ||
                  (label === "停止机器人" && !SCHEMA_STATE.running);
     b.onclick = () => runAction(label);
@@ -332,16 +334,21 @@ function renderStatusPage(host) {
   const lh = document.createElement("div");
   lh.className = "sec-head";
   lh.textContent = "运行日志";
+  // 实时刷新指示。日志现在是每 2 秒自己刷的，得让用户看得见这件事在发生 ——
+  // 否则「它不动」和「它已经是最新」看起来一模一样。
+  const at = document.createElement("span");
+  at.id = "liveAt";
+  at.className = "live-at";
+  at.textContent = "读取中…";
+  lh.appendChild(at);
   host.appendChild(lh);
   const box = document.createElement("div");
   box.className = "logbox";
   box.id = "logbox";
   box.textContent = "(读取中…)";
   host.appendChild(box);
-  api("/api/log").then((r) => {
-    box.textContent = r.text || "(空)";
-    box.scrollTop = box.scrollHeight;
-  }).catch(() => { box.textContent = "(读取失败)"; });
+  // 这里**不再**单独 fetch 一次日志：render() 结尾会立刻调一次 liveTick()，
+  // 内容由它填。两条路填同一个框，迟早会打架。
 
   const fh = document.createElement("div");
   fh.className = "sec-head";
@@ -389,22 +396,100 @@ function render() {
   void host.offsetWidth;
   host.classList.add("enter");
 
+  updatePill();
+  refreshDirty();
+  // 页面刚建好就立刻拉一次实时数据（日志框还是「读取中…」）。
+  // 定时器每 2 秒跑一次，但切页面不该等那 2 秒。
+  liveTick();
+}
+
+/* ------------------------------------------------------------ 实时刷新 */
+/* 日志区原来只在页面渲染时读一次，想看新日志只能点「刷新状态」——
+   而那个按钮会把整页重建一遍（还会顺手丢掉没保存的修改）。
+   现在改成独立轮询：只取运行状态 + 日志尾巴，**原地更新**，
+   完全不碰任何输入控件，所以不可能影响正在编辑的内容。
+
+   为什么是轮询而不是 SSE/WebSocket：后端是标准库的 http.server，
+   加一条长连接要处理线程、重连、半开连接；而这里 2 秒一次 GET 一个
+   很小的 JSON 就够了，本地回环没有带宽问题。简单优先。 */
+const LIVE_MS = 2000;
+let liveFails = 0;
+
+function setLiveAt(text) {
+  const el = $("liveAt");
+  if (el && el.textContent !== text) el.textContent = text;
+}
+
+function updatePill() {
   const p = $("statusPill");
+  if (!p || !SCHEMA_STATE) return;
   p.className = "pill" + (SCHEMA_STATE.stopped ? " stop"
                         : SCHEMA_STATE.running ? " on" : "");
   p.textContent = SCHEMA_STATE.stopped ? "运行中 · 已急停"
                 : SCHEMA_STATE.running ? "运行中" : "已停止";
-  refreshDirty();
+}
+
+function applyLive(r) {
+  SCHEMA_STATE.running = r.running;
+  SCHEMA_STATE.stopped = r.stopped;
+  updatePill();
+
+  for (const [label, off] of [["启动机器人", r.running],
+                              ["停止机器人", !r.running]]) {
+    const b = document.querySelector(`[data-action="${label}"]`);
+    if (b) b.disabled = off;
+  }
+
+  // 统计格子按顺序一一对应。数量对不上就整体不动 —— 宁可不刷，
+  // 也不要把值错位到别的标签底下（那比不刷新糟糕得多）。
+  const vals = document.querySelectorAll("#content .stat-v");
+  if (r.status.length === vals.length) {
+    r.status.forEach((s, i) => {
+      if (vals[i].textContent !== s.value) vals[i].textContent = s.value;
+    });
+  }
+
+  const box = $("logbox");
+  if (box) {
+    if (box.textContent !== r.log) {
+      // 用户往上翻着看历史的时候，别把他拽回底部。只在「本来就在底部」时跟随。
+      const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+      box.textContent = r.log;
+      if (atBottom) box.scrollTop = box.scrollHeight;
+    }
+    setLiveAt("实时 · " + r.at);
+  }
+}
+
+async function liveTick() {
+  // 窗口在后台就别轮询了：看不见的东西不需要每 2 秒刷一次。
+  if (document.hidden) return;
+  try {
+    const r = await api("/api/live");
+    liveFails = 0;
+    applyLive(r);
+  } catch (e) {
+    liveFails += 1;
+    if (liveFails >= 3) {
+      setLiveAt("刷新失败");
+      const box = $("logbox");
+      if (box) box.textContent = "(读取失败：" + e.message + ")";
+    }
+  }
 }
 
 /* ---------------------------------------------------------------- 加载/保存 */
 async function reload(silent = false) {
   try {
+    // **刷新不能吃掉没保存的修改。** 原来这里直接把 VALUES 覆盖成磁盘值，
+    // 于是点一下「刷新状态」刚改的东西就没了 —— 而且悄无声息，没有任何提示。
+    // 现在先把「脏」的键记下来，读回来之后再盖回去。
+    const dirty = SCHEMA ? changedKeys() : {};
     const st = await api("/api/state");
     SCHEMA = st.schema;
     SCHEMA_STATE = st;
     ORIGINAL = { ...st.values };
-    VALUES = { ...st.values };
+    VALUES = { ...st.values, ...dirty };
     if (!silent) { PAGE = 0; }
     renderNav();
     render();
@@ -461,3 +546,11 @@ window.addEventListener("beforeunload", (e) => {
 
 applyTheme();
 reload();
+
+/* 实时刷新的心跳。只开一个，和页面切换无关 —— 切到别的页时
+   #logbox 不存在，applyLive 会跳过日志那部分，状态灯照样在刷。 */
+setInterval(liveTick, LIVE_MS);
+// 从后台切回前台时立刻补一次，别让用户盯着最多 2 秒的旧数据。
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) liveTick();
+});

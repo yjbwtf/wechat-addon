@@ -72,15 +72,12 @@ def current_values() -> dict[str, str]:
     return out
 
 
-def state() -> dict:
-    """一次把所有东西给前端：结构 + 当前值 + 运行状态。"""
-    schema = load_schema()
-    values = current_values()
-    kinds = _kind_map()
+def status_items(schema: dict) -> list[dict]:
+    """把 B.status_lines() 变成带中文标签、给人看的列表。
 
-    # status_lines() 返回的是 (key, kind, value) —— 没有中文标签。
-    # 标签在 schema 的 stats 里（原来 C 界面那张 g_stats 表）。
-    # 另外 bridge 报的布尔是 "1"/"0"，这里换成给人看的文字。
+    从 state() 里拆出来，是因为 /api/live 也要用它 —— 那个接口每 2 秒被调一次，
+    不能再顺带把整个 config.yaml 读一遍。
+    """
     labels = {s["key"]: s["label"] for s in schema.get("stats", [])}
     # bridge 报的布尔是 "1"/"0"，换成给人看的文字。逐个 key 明确映射，
     # 别用一个「1 就是运行中」的通式糊过去 —— @status.stopped 是 1 时
@@ -99,6 +96,32 @@ def state() -> dict:
         if key == "@status.pid" and not value:
             value = "—"
         status.append({"key": key, "label": label, "value": value})
+    return status
+
+
+def live() -> dict:
+    """界面轮询用的轻量快照：运行状态 + 日志尾巴。
+
+    为什么不直接复用 /api/state：那个要读 config.yaml / persona.yaml /
+    memes.yaml 再展平成 80 多个字段（见 current_values）。每 2 秒来一次太浪费，
+    而且完全没必要 —— 日志区要的只是这两样东西。
+    """
+    schema = load_schema()
+    status = status_items(schema)
+    running = any(s["key"] == "@status.running" and s["value"] == "运行中"
+                  for s in status)
+    stopped = any(s["key"] == "@status.stopped" and s["value"] != "无"
+                  for s in status)
+    return {"status": status, "running": running, "stopped": stopped,
+            "log": log_tail(), "at": time.strftime("%H:%M:%S")}
+
+
+def state() -> dict:
+    """一次把所有东西给前端：结构 + 当前值 + 运行状态。"""
+    schema = load_schema()
+    values = current_values()
+    kinds = _kind_map()
+    status = status_items(schema)
 
     running = any(s["key"] == "@status.running" and s["value"] == "运行中"
                   for s in status)
@@ -333,6 +356,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(state())
             elif path == "/api/log":
                 self._json({"text": log_tail()})
+            elif path == "/api/live":
+                # 界面每 2 秒轮询这个：只为了刷新日志区和运行状态。
+                self._json(live())
             else:
                 self._json({"error": "unknown"}, 404)
             return

@@ -230,6 +230,13 @@ html, body {
 }
 .sec-head:first-child { margin-top: 6px; }
 
+/* 「运行日志」右边的实时刷新指示。做得比标题弱一档：
+   它是状态提示，不是内容。 */
+.live-at {
+  margin-left: 10px; font-size: 12px; font-weight: 400;
+  color: var(--text-3); font-family: "Cascadia Mono", Consolas, monospace;
+}
+
 .sec-note {
   font-size: 12.5px; color: var(--text-3); margin: 0 0 10px;
   max-width: 70ch;
