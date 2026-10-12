@@ -41,22 +41,46 @@ from .memes import MemeBook
 
 log = logging.getLogger("wechat-bot.memes")
 
-PROMPT = """用联网搜索查一下**最近流行**的中文网络热梗（最近三个月内为主，可以带少量仍在高频使用的）。
+PROMPT = """用联网搜索查一下**最近正在流行**的中文网络热梗。
 
-已经收录的（不要重复，包括它们的别名）：
+## 去哪儿找（按这个顺序看，别只看一个来源）
+
+1. **B站**：热搜榜、每周必看、鬼畜区/生活区的爆款、热门弹幕梗；
+2. **抖音/小红书**：热榜、评论区反复出现的短句；
+3. **贴吧、NGA、抽象圈**：游戏圈（原神/鸣潮/明日方舟/崩铁等）和主播圈的黑话；
+4. **萌娘百科 / 各大梗百科**：查证来源和个人物的出处。
+
+**不要只收"正能量"的**。低俗的、抽象的、阴阳怪气的、只有圈内人才懂的，
+只要确实在高频使用就收 —— 群里就是这么说话的，机器人接不住反而出戏。
+（这是给一个成年人小群用的私人机器人，不是公开发布的内容。）
+
+## 已经收录的（不要重复，包括它们的别名）
+
 {existing}
 
-挑出最多 {max_new} 个最值得知道的，只输出一个 JSON 数组，不要任何别的文字、不要代码块围栏：
+## 输出
+
+挑出最多 {max_new} 个最值得知道的，只输出一个 JSON 数组，
+不要任何别的文字、不要代码块围栏：
 
 [
-  {{"term": "梗的标准写法", "alias": ["别名", "变体"], "note": "来源/用法。表达什么情绪。接梗姿势：顺着演还是别接。"}}
+  {{"term": "梗的标准写法", "alias": ["别名", "变体"], "note": "来源/用法。表达什么情绪。怎么接。", "weak": false}}
 ]
 
-要求：
+## 要求
+
 - note 控制在 60 字以内，要具体到「另一个模型看了就知道怎么接」；
 - note 里不要出现英文双引号，也不要有换行；
-- term 用最常被写出来的那个形式；
-- 拿不准来源的宁可不写，不要编。"""
+- term 用最常被写出来的那个形式；别名把常见的变体都列上
+  （比如「你干嘛」还有「哎哟你干嘛」，蔡徐坤还有「鸡哥」「坤坤」「鸡你太美」）；
+- **`weak` 怎么填**：这个说法**日常也天天用**、字面出现不代表在玩梗的，
+  填 true；只有这个词本身就很专用（说了基本就是在玩梗）才填 false。
+  例：「你干嘛」是 true（平时问人也会这么说）；
+  「鸡你太美」「驾考宝典」「不烧心」是 false。
+  判断不准就填 true —— 多标一个的代价只是模型多看一眼语境，
+  漏标的代价是机器人看到「你干嘛」就硬接梗；
+- **拿不准来源的宁可不写，不要编。** 宁可这一轮少收几条，
+  也不要让机器人用一个不存在的梗去接话 —— 那比不懂梗更丢人。"""
 
 
 def state_path(root: Path) -> Path:
@@ -184,12 +208,17 @@ def update(book: MemeBook, brain, cfg: AutoUpdateConfig, root: Path,
             skipped += 1
             continue
         aliases = [str(a).strip() for a in (item.get("alias") or []) if str(a).strip()]
+        # 弱梗标记：模型说「日常也这么用，字面命中不代表在玩梗」时记下来。
+        # **判断不准的一律当弱梗** —— 多标一个只是让模型多看一眼语境，
+        # 漏标会让机器人看到「你干嘛」就硬接梗。
+        weak = item.get("weak")
+        weak = True if weak is None else bool(weak)
         keys = {term.lower()} | {a.lower() for a in aliases}
         if keys & known:
             skipped += 1
             continue
         # 走 MemeBook.add，落进 data/memes_user.yaml（内置库一个字都不动）
-        result = book.add(term, note, aliases=aliases)
+        result = book.add(term, note, aliases=aliases, weak=weak)
         if result.startswith("记住"):
             known |= keys
             added.append(term)

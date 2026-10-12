@@ -37,6 +37,15 @@ class MemeEntry:
     note: str
     aliases: list[str] = field(default_factory=list)
     source: str = "builtin"      # builtin | user
+    #: 弱梗：**字面命中不代表在玩梗**。
+    #:
+    #: 「你干嘛」这种日常也天天说的词，一命中就当成玩梗肯定是错的。
+    #: 标成弱梗之后：
+    #:   · 注入时会被明确标出来，并告诉模型「先看语境，不是玩梗就正常答」
+    #:   · **不再从聊天历史里命中**（历史里撞上太容易，等于每轮都白烧 token
+    #:     还把回复带偏）
+    #: 判断本身交给模型 —— 字面信息不足以判断，硬编码规则只会更糟。
+    weak: bool = False
 
     def needles(self) -> list[str]:
         out = [self.term] + list(self.aliases)
@@ -118,6 +127,7 @@ class MemeBook:
                 note=str(item.get("note") or "").strip(),
                 aliases=[str(a).strip() for a in alias if str(a).strip()],
                 source=source,
+                weak=bool(item.get("weak", False)),
             ))
         return out
 
@@ -175,6 +185,11 @@ class MemeBook:
         for hit in hits:
             if len(out) >= max(1, limit):
                 break
+            # 弱梗只认**当前这条消息**里的命中。历史里撞上太容易 ——
+            # 「你干嘛」在前几条消息里出现过，不代表这条在玩梗，
+            # 白烧 token 还会把回复带偏。
+            if hit.entry.weak and hit.where == "ctx":
+                continue
             if hit.where == "ctx" and ctx_used >= max(0, max_history_hits):
                 continue
             cost = len(hit.entry.term) + len(hit.entry.note) + 4
@@ -188,21 +203,41 @@ class MemeBook:
 
     @staticmethod
     def format_block(entries: list[MemeEntry]) -> str:
+        """把命中的梗变成给模型看的一小段。
+
+        弱梗单独标出来，并且附一句「先看语境」——判断交给模型，
+        因为「你干嘛」到底是在玩梗还是真的在问，只有看上下文才知道。
+        """
         if not entries:
             return ""
         lines = []
+        has_weak = False
         for e in entries:
             note = e.note or "群里的梗，顺着接就行"
-            lines.append(f"{e.term}={note}")
-        return "\n".join(lines)
+            if e.weak:
+                has_weak = True
+                lines.append(f"[可能是梗]{e.term}={note}")
+            else:
+                lines.append(f"{e.term}={note}")
+        out = "\n".join(lines)
+        if has_weak:
+            out += ("\n（标了[可能是梗]的那几条，字面**日常也这么说** —— "
+                    "别一看到就当玩梗：先看语境（有没有人接同一个梗、"
+                    "语气是不是在闹、整条消息是不是就这几个字）。"
+                    "不是在玩梗就正常回答，**不要硬接，也不要科普这个梗**）")
+        return out
 
     # ------------------------------------------------------------ 增删
-    def add(self, term: str, note: str, aliases: list[str] | None = None) -> str:
+    def add(self, term: str, note: str, aliases: list[str] | None = None,
+            weak: bool = False) -> str:
         """教一个新梗。返回给群里看的回执。
 
         `aliases` 是给自动更新用的 —— 联网捞回来的条目常带一堆变体写法
         （「我要验牌」还有「给我擦皮鞋」「牌没有问题」），不带上就浪费了。
         群里手打的 `\\\\梗 add` 不用传，保持简单。
+
+        `weak` 是给自动更新用的：模型判断这个梗「字面日常也这么说」时标上，
+        注入时会附带「先看语境」的说明（判断交给模型，见 MemeEntry.weak）。
         """
         term = (term or "").strip()
         note = (note or "").strip()
@@ -230,11 +265,17 @@ class MemeBook:
                 item["note"] = note
                 if clean_alias:
                     item["alias"] = clean_alias
+                if weak:
+                    item["weak"] = True
+                else:
+                    item.pop("weak", None)
                 break
         else:
             entry: dict = {"term": term, "note": note}
             if clean_alias:
                 entry["alias"] = clean_alias
+            if weak:
+                entry["weak"] = True
             items.append(entry)
 
         self.user_path.parent.mkdir(parents=True, exist_ok=True)

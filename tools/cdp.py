@@ -38,6 +38,8 @@
 """
 
 import json
+import os
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -45,7 +47,7 @@ import urllib.request
 
 import websocket
 
-PORT = 9222
+PORT = int(os.environ.get("CDP_PORT", "9222"))
 BASE = f"http://127.0.0.1:{PORT}"
 
 
@@ -54,8 +56,61 @@ def _get(path):
         return json.loads(r.read().decode("utf-8"))
 
 
+def _truthy(v) -> bool:
+    return str(v or "").strip().lower() not in ("", "0", "false", "no")
+
+
+def port_up(seconds: float = 0.0) -> bool:
+    """调试口通不通。seconds > 0 时轮询等一会儿。"""
+    end = time.time() + max(0.0, seconds)
+    while True:
+        try:
+            with urllib.request.urlopen(BASE + "/json/version", timeout=2) as r:
+                r.read()
+            return True
+        except Exception:  # noqa: BLE001
+            if time.time() >= end:
+                return False
+            time.sleep(0.5)
+
+
+def ensure_browser(edge: str, profile: str, wait: float = 40.0):
+    """确保有一个能用的调试口浏览器。**已经在跑就复用，不再起第二个。**
+
+    为什么要有这个函数：原来每个浏览器测试各自 `subprocess.Popen` 起一个
+    Edge，跑一轮六个测试就是六个窗口往外弹 —— 用户被弹烦了直接把浏览器
+    关了，测试也就全跑不了。现在测试先问一句「端口通不通」，通就直接挂上去。
+
+    设 `CDP_HEADLESS=1` 时用无头模式起 —— 一个窗口都不弹。
+    返回自己起的 Popen；复用时返回 None。
+    """
+    if port_up():
+        return None
+    args = [edge, f"--remote-debugging-port={PORT}",
+            f"--user-data-dir={profile}", "--profile-directory=Default",
+            "--no-first-run"]
+    if _truthy(os.environ.get("CDP_HEADLESS")):
+        args += ["--headless=new", "--disable-gpu", "--hide-scrollbars"]
+    args.append("about:blank")
+    proc = subprocess.Popen(args, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    if not port_up(wait):
+        return None
+    return proc
+
+
 def list_tabs():
     return [t for t in _get("/json/list") if t.get("type") == "page"]
+
+
+def close_tab(target_id: str) -> bool:
+    try:
+        with urllib.request.urlopen(f"{BASE}/json/close/{target_id}",
+                                    timeout=10) as r:
+            r.read()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def new_tab(url):
