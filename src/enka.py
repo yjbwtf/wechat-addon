@@ -226,8 +226,16 @@ def fetch(game: str, uid: str, timeout: float = 20.0) -> dict:
 
 
 # ------------------------------------------------------------------ 解析
-def _gi_avatars(data: dict) -> list[tuple[str, str, str]]:
-    """原神：优先用 avatarInfoList（有等级和命座），没有就退回展柜预览。"""
+def _gi_avatars(data: dict) -> tuple[list[tuple[str, str, str]], bool]:
+    """原神：优先用 avatarInfoList（有命座），没有就退回展柜概要。
+
+    返回 (角色列表, 是不是只有概要)。
+
+    **实测这两种情况都会遇到**：某个 UID 的 `avatarInfoList` 是空的，
+    而 `showAvatarInfoList` 有 12 个角色 —— 展柜开着、但详细数据拿不到
+    （游戏里没开「展柜详情」之类）。这时候只能列出「名字 + 等级」，
+    没有命座，得跟用户说清楚为什么，否则会以为是程序坏了。
+    """
     out: list[tuple[str, str, str]] = []
     for a in data.get("avatarInfoList") or []:
         lvl = ((a.get("propMap") or {}).get("4001") or {}).get("ival")
@@ -235,14 +243,14 @@ def _gi_avatars(data: dict) -> list[tuple[str, str, str]]:
         out.append((avatar_name("gi", a.get("avatarId")),
                     str(lvl or "?"), ("C%d" % cons) if cons else ""))
     if out:
-        return out
+        return out, False
     for a in ((data.get("playerInfo") or {}).get("showAvatarInfoList") or []):
         out.append((avatar_name("gi", a.get("avatarId")),
                     str(a.get("level") or "?"), ""))
-    return out
+    return out, bool(out)
 
 
-def _zzz_avatars(data: dict) -> list[tuple[str, str, str]]:
+def _zzz_avatars(data: dict) -> tuple[list[tuple[str, str, str]], bool]:
     """绝区零：字段是 PascalCase，和原神完全两套（文档里写的）。"""
     pi = data.get("PlayerInfo") or {}
     detail = (pi.get("ShowcaseDetail") or {}).get("AvatarList") or []
@@ -252,10 +260,10 @@ def _zzz_avatars(data: dict) -> list[tuple[str, str, str]]:
         out.append((avatar_name("zzz", a.get("Id")),
                     str(a.get("Level") or "?"),
                     ("命%d" % mind) if mind else ""))
-    return out
+    return out, False
 
 
-def _hsr_avatars(data: dict) -> list[tuple[str, str, str]]:
+def _hsr_avatars(data: dict) -> tuple[list[tuple[str, str, str]], bool]:
     """星穹铁道：Enka 没给公开文档，按原神那套防御性地取。
 
     取不到就算了 —— 宁可少显示一行，也不要因为字段名猜错而整条报错。
@@ -267,11 +275,11 @@ def _hsr_avatars(data: dict) -> list[tuple[str, str, str]]:
         out.append((avatar_name("hsr", a.get("avatarId") or a.get("avatarID")),
                     str(lvl or "?"), ("E%d" % cons) if cons else ""))
     if out:
-        return out
+        return out, False
     for a in ((data.get("playerInfo") or {}).get("showAvatarInfoList") or []):
         out.append((avatar_name("hsr", a.get("avatarId")),
                     str(a.get("level") or "?"), ""))
-    return out
+    return out, bool(out)
 
 
 _REGION = {"cn": "国服", "os_usa": "美服", "os_euro": "欧服",
@@ -292,7 +300,7 @@ def format_reply(game: str, uid: str, data: dict) -> str:
         line2 = []
         if lvl:
             line2.append("绳网等级 %s" % lvl)
-        avatars = _zzz_avatars(data)
+        avatars, summary_only = _zzz_avatars(data)
     else:
         pi = data.get("playerInfo") or {}
         nick = pi.get("nickname") or "?"
@@ -306,7 +314,10 @@ def format_reply(game: str, uid: str, data: dict) -> str:
         f, c = pi.get("towerFloorIndex"), pi.get("towerLevelIndex")
         if f and c:
             line2.append("深境 %s-%s" % (f, c))
-        avatars = _gi_avatars(data) if game == "gi" else _hsr_avatars(data)
+        if game == "gi":
+            avatars, summary_only = _gi_avatars(data)
+        else:
+            avatars, summary_only = _hsr_avatars(data)
 
     region = _REGION.get(str(data.get("region") or "").lower(), data.get("region"))
     head = "%s · %s（UID %s%s）" % (
@@ -316,12 +327,18 @@ def format_reply(game: str, uid: str, data: dict) -> str:
     if line2:
         lines.append(" · ".join(line2))
     if avatars:
-        shown = avatars[:8]
+        # 原神展柜最多 12 个，就别只列 8 个了 —— 少列的那几个正是用户想看的
+        shown = avatars[:12]
         body = "、".join(
             "%s %s%s" % (n, lv, (" " + c) if c else "") for n, lv, c in shown)
         if len(avatars) > len(shown):
             body += " 等 %d 个" % len(avatars)
         lines.append("展柜 %d 个：%s" % (len(avatars), body))
+        if summary_only:
+            # 只说明缺了什么 + 怎么才能有。不猜原因（从响应里看不出是
+            # 「展柜详情没开」还是「这次没抓到」），但把出路写清楚。
+            lines.append("（只有概要：拿不到命座和武器。"
+                         "游戏里把角色展柜的详细数据打开就有了）")
     else:
         lines.append("没看到角色展柜 —— 游戏里「展柜」关了或者没放角色。")
     return "\n".join(lines)

@@ -100,6 +100,38 @@ out2 = enka.format_reply("gi", "1", GI_EMPTY)
 check("没展柜时明确说清楚，而不是空白",
       "没看到角色展柜" in out2, out2)
 
+# 「只有概要」的情况 —— 实测会遇到：avatarInfoList 空、showAvatarInfoList 有 12 个
+# （137602053 那个号就是这样：玩家没开放角色详细数据）
+GI_SUMMARY = {
+    "playerInfo": {"nickname": "概要哥", "level": 60, "worldLevel": 9,
+                   "showAvatarInfoList": [
+                       {"avatarId": 10000002, "level": 90},
+                       {"avatarId": 10000003, "level": 80},
+                       {"avatarId": 10000005, "level": 70},
+                   ]},
+    "ttl": 60, "uid": "2", "region": "cn_gf01",
+}
+out3 = enka.format_reply("gi", "2", GI_SUMMARY)
+print(out3)
+print()
+check("只有概要时用 showAvatarInfoList 列出角色",
+      "神里绫华 90" in out3 and "琴 80" in out3 and "旅行者 70" in out3, out3)
+check("**说明白为什么没有命座**（否则看着像程序坏了）",
+      "只有概要" in out3, out3)
+check("有详细数据时**不该**出现那句提示", "只有概要" not in out, out)
+
+# 12 个以上时截断并报总数
+GI_MANY = {
+    "playerInfo": {"nickname": "一堆人", "level": 60,
+                   "showAvatarInfoList": [
+                       {"avatarId": 10000002 + i * 1000, "level": 90}
+                       for i in range(15)]},
+    "ttl": 60, "uid": "3", "region": "cn_gf01",
+}
+out4 = enka.format_reply("gi", "3", GI_MANY)
+check("超过 12 个时列 12 个并报总数",
+      out4.count("90") >= 12 and "等 15 个" in out4, out4[:200])
+
 # 绝区零：字段是 PascalCase，和原神完全两套（按官方文档的结构造）
 ZZZ = {
     "uid": "1300000001", "ttl": 60,
@@ -396,6 +428,11 @@ class _RouterBot:
         self.stop = type("S", (), {"stopped": False})()
         self.agg = type("A", (), {"enabled": False,
                                   "drop": lambda *a, **k: None})()
+        # handle() 在指令分支里会调 adapter.resolve_identity()（受
+        # commands.verify_identity 控制，默认开着）。给个桩，
+        # 否则每次跑测试都往 stderr 吐一条「身份解析失败」的告警。
+        self.adapter = type("Ad", (), {
+            "resolve_identity": staticmethod(lambda *a, **k: {})})()
         self.hit: list[str] = []
 
     def handle_public_command(self, msg, body):
