@@ -27,6 +27,7 @@
     python tools/cdp.py click <targetId> <js>  # 跑 JS 并返回结果（同 eval，语义化）
     python tools/cdp.py shot  <targetId> <png> # 截图存文件
     python tools/cdp.py frames <targetId>      # 列出 iframe 树
+    python tools/cdp.py feval <targetId> <frameUrl片段> <js>  # 在 iframe 里跑 JS
 
 依赖 `websocket-client`（已在 requirements.txt 里；它是后补进去的，
 之前这个包只是恰好躺在环境里，重建 venv 就会 ModuleNotFoundError）。
@@ -146,6 +147,47 @@ def main():
         with open(out, "wb") as f:
             f.write(data)
         print(f"{out}  {len(data)} bytes")
+        s.close()
+    elif cmd == "feval":
+        # feval <targetId> <frameUrlSubstr> <js>
+        # 在 iframe 里跑 JS。跨进程/跨源的 iframe 在顶层页面里摸不到
+        # （contentDocument 为 null），只能走框架自己的执行上下文。
+        s = Session(sys.argv[2])
+        sub = sys.argv[3]
+        expr = sys.argv[4]
+        s.send("Page.enable")
+        found = []
+
+        def walk(node):
+            fr = node["frame"]
+            if sub in (fr.get("url") or ""):
+                found.append(fr["id"])
+            for c in node.get("childFrames", []) or []:
+                walk(c)
+
+        walk(s.send("Page.getFrameTree")["frameTree"])
+        if not found:
+            raise SystemExit("找不到 url 含「%s」的框架" % sub)
+        ctx = s.send(
+            "Page.createIsolatedWorld",
+            frameId=found[0],
+            worldName="agent",
+            grantUniveralAccess=True,
+        )["executionContextId"]
+        r = s.send(
+            "Runtime.evaluate",
+            expression=expr,
+            contextId=ctx,
+            returnByValue=True,
+            awaitPromise=True,
+            userGesture=True,
+        )
+        if "exceptionDetails" in r:
+            print(json.dumps({"__error__": str(r["exceptionDetails"])[:800]},
+                             ensure_ascii=False))
+        else:
+            print(json.dumps(r.get("result", {}).get("value"),
+                             ensure_ascii=False, default=str))
         s.close()
     elif cmd == "frames":
         s = Session(sys.argv[2])

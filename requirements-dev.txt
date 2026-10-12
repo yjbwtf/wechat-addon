@@ -1,0 +1,10 @@
+# 开发/调试用的依赖。**机器人运行时不需要这些**，所以不放进
+# requirements.txt —— 那份是"跑机器人所必需的"清单，混进调试工具会让
+# 依赖和实际需要对不上（这个项目已经因为"某个包恰好躺在环境里"
+# 踩过一次：tools/cdp.py 依赖 websocket-client，但当时没写进清单，
+# 换台机器就会 ModuleNotFoundError）。
+
+# 读 dsh 的会话转录（session.v4.jsonl.zstd 是多个 zstd 帧拼的追加式日志）。
+# 用途：事后查 \agent 到底执行了哪些命令、为什么失败。
+# 见 data\_read_session.py / data\_timeline.py / data\_log_window.py。
+zstandard>=0.22
