@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -390,40 +391,96 @@ def _build_line(name: str, level: str, cons: str, build,
 
 
 # ------------------------------------------------------------------ 参数解析
+#: 游戏名按长度降序 —— 「崩坏星穹铁道」要在「崩铁」「星铁」之前试
+_ALIAS_KEYS = sorted(ALIASES, key=len, reverse=True)
+
+#: UID 的长度范围（Enka 那边也是这个范围，见 parse_args 的校验）
+_UID_LEN = (6, 10)
+
+
+def _match_game(text: str) -> tuple[str | None, str]:
+    """一段文字开头是不是游戏名。返回 (游戏, 剩下的部分)。"""
+    low = (text or "").lower()
+    for key in _ALIAS_KEYS:
+        if low.startswith(key):
+            return ALIASES[key], text[len(key):]
+    return None, text
+
+
 def parse_args(text: str) -> tuple[str | None, str | None, str, str]:
     """解析 `[游戏] <uid> [角色名]`。返回 (游戏, uid, 角色名, 错误说明)。
 
-    - 游戏可以省略（省略时自动试三个）
-    - uid 必须是纯数字
-    - 角色名可以省略；给了就只输出那个角色的完整面板。
-      它允许**不完整**（子串匹配），所以「可莉」「莉」都行 —— 但为了不
-      误吃参数，只在前面两项都认出来之后才把它当角色名。
+    **空格可有可无** —— 这是用户明确要求的：
+
+        原神 137602053 可莉
+        原神137602053可莉
+        137602053可莉
+        gi137602053
+        137602053
+
+    找 UID 时**优先挑「长度像 UID」的数字段**（6~10 位），不是第一个数字段 ——
+    有些角色名自带数字（绝区零的「11号」、崩铁的「银狼LV.999」），
+    先到先得会把 11 当成 UID。实测踩过：`11号 137602053` 报「你给的是 2 位」。
+
+    游戏省略时自动试三个；角色名允许不完整（子串匹配）。
     """
     parts = [p for p in (text or "").replace("，", " ").split() if p]
     if not parts:
         return None, None, "", "要查谁的？给我一个 UID，例如：uid 618285856"
-    game = None
-    uid = None
-    rest: list[str] = []
-    for p in parts:
-        low = p.lower()
-        if uid is None and low in ALIASES:
-            game = ALIASES[low]
-            continue
-        if uid is None and p.isdigit():
-            uid = p
-            continue
-        rest.append(p)
+
+    # ---- 1) 先找 UID：优先长度像 UID 的那一段 ---------------------------
+    uid: str | None = None
+    at: tuple[int, int, int] | None = None      # (第几个词, 起, 止)
+    for i, p in enumerate(parts):
+        for m in re.finditer(r"\d+", p):
+            if _UID_LEN[0] <= len(m.group()) <= _UID_LEN[1]:
+                uid, at = m.group(), (i, m.start(), m.end())
+                break
+        if uid:
+            break
     if uid is None:
-        bad = rest[0] if rest else ""
+        # 没有像 UID 的，随便挑一个数字段 —— 为了能说「位数不对」而不是
+        # 「我看不懂」，后者对用户没有帮助
+        for i, p in enumerate(parts):
+            m = re.search(r"\d+", p)
+            if m:
+                uid, at = m.group(), (i, m.start(), m.end())
+                break
+    if uid is None:
+        bad = next((p for p in parts if any(c.isalnum() for c in p)), "")
         if bad:
             return None, None, "", ("「%s」我看不懂。格式是："
-                                    "查询 [游戏] <UID> [角色名]" % bad)
+                                    "查询 [游戏] <UID> [角色名]，空格可有可无"
+                                    % bad)
         return None, None, "", "没看到 UID（要纯数字）。"
-    if not 6 <= len(uid) <= 10:
+
+    # ---- 2) 游戏名和角色名 ---------------------------------------------
+    game: str | None = None
+    names: list[str] = []
+    for i, p in enumerate(parts):
+        if at and i == at[0]:
+            head, tail = p[:at[1]], p[at[2]:]
+            if head:
+                g, rest = _match_game(head)
+                if g and game is None:
+                    game = g
+                    if rest:
+                        names.append(rest)
+                else:
+                    names.append(head)
+            if tail:
+                names.append(tail)
+            continue
+        low = p.lower()
+        if game is None and low in ALIASES:
+            game = ALIASES[low]
+            continue
+        names.append(p)
+
+    if not _UID_LEN[0] <= len(uid) <= _UID_LEN[1]:
         # Enka 对格式不对的 UID 直接 400；本地先拦一道，省一次请求
         return None, None, "", "UID 一般是 9 位数字，你给的 %d 位，检查一下？" % len(uid)
-    return game, uid, " ".join(rest).strip(), ""
+    return game, uid, " ".join(names).strip(), ""
 
 
 # ------------------------------------------------------------------ 缓存与限流

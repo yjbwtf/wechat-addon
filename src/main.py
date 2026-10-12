@@ -702,17 +702,22 @@ class Bot:
             logging.info("UID 查询指令未开启")
             return
 
-        arg = self.gate.strip_secret(self.gate.command_args(body)).strip()
-        if not arg:
-            # 指令词可能和参数连在一起写（「uid618285856」）
-            first = re.split(r"[\s,，。!！?？|]+",
-                             self.gate.strip_secret(body).strip())[0]
+        # 把指令词从**第一个词**里剥掉，但**保留后面的词**。
+        #
+        # 原来分两条路：有空格时用 command_args（它会把第一个词整个丢掉），
+        # 没空格时只取第一个词。结果是「/查询原神 137602053 可莉」里的
+        # UID 和角色名会被扔掉。现在统一成：只在第一个词里找指令词。
+        raw = self.gate.strip_secret(body).strip()
+        tokens = [t for t in re.split(r"[\s,，。!！?？|]+", raw) if t]
+        if tokens:
+            head = tokens[0]
             for w in sorted(cfg.words, key=len, reverse=True):
-                if first.lower().startswith(str(w).lower()):
-                    arg = first[len(str(w)):].strip()
+                if head.lower().startswith(str(w).lower()):
+                    head = head[len(str(w)):]
                     break
-            else:
-                arg = first
+            arg = " ".join([head] + tokens[1:]).strip()
+        else:
+            arg = ""
 
         game = uid = None
         focus = ""
