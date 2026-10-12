@@ -50,12 +50,25 @@ ENDPOINT = {
     "hsr": "https://enka.network/api/hsr/uid/{uid}/",
     "zzz": "https://enka.network/api/zzz/uid/{uid}/",
 }
-#: 用户可能怎么叫这几个游戏
+#: 用户可能怎么叫这几个游戏。
+#:
+#: 按「大家实际会打的字」收，不是按官方全名收：口语简写（崩铁/星铁/绝区）、
+#: 拼音缩写（hsr/zzz/ys）、官方名**带冒号**的写法（崩坏：星穹铁道）、
+#: 以及常见错字（元神）。反正这几个词当角色名是不可能的，多认几个不亏。
 ALIASES = {
-    "gi": "gi", "genshin": "gi", "原神": "gi", "原": "gi",
-    "hsr": "hsr", "starrail": "hsr", "星铁": "hsr", "崩铁": "hsr",
-    "星穹铁道": "hsr", "崩坏星穹铁道": "hsr",
-    "zzz": "zzz", "zenless": "zzz", "绝区零": "zzz", "绝": "zzz",
+    # ---- 原神 ----
+    "gi": "gi", "genshin": "gi", "genshinimpact": "gi", "ys": "gi",
+    "原神": "gi", "原": "gi", "元神": "gi", "提瓦特": "gi",
+    # ---- 崩坏：星穹铁道 ----
+    "hsr": "hsr", "starrail": "hsr", "honkai": "hsr",
+    "honkaistarrail": "hsr", "sr": "hsr", "bht": "hsr",
+    "崩铁": "hsr", "星铁": "hsr", "星穹": "hsr", "铁道": "hsr",
+    "星轨": "hsr", "星穹铁道": "hsr", "崩坏星穹铁道": "hsr",
+    # 官方名里是有冒号的（崩坏：星穹铁道），全角半角都收
+    "崩坏：星穹铁道": "hsr", "崩坏:星穹铁道": "hsr",
+    # ---- 绝区零 ----
+    "zzz": "zzz", "zenless": "zzz", "zenlesszonezero": "zzz",
+    "jql": "zzz", "绝区零": "zzz", "绝区": "zzz", "绝": "zzz",
 }
 
 _DATA: dict | None = None
@@ -398,6 +411,19 @@ _ALIAS_KEYS = sorted(ALIASES, key=len, reverse=True)
 _UID_LEN = (6, 10)
 
 
+def _alias_of(tok: str) -> str | None:
+    """这个 token 是不是游戏名。返回游戏代码或 None。
+
+    允许尾部带标点（「崩坏：」这种写法会把冒号留在词尾）。
+    """
+    t = str(tok or "").strip()
+    for cand in (t, t.rstrip("：:、·，,。.")):
+        hit = ALIASES.get(cand.lower())
+        if hit:
+            return hit
+    return None
+
+
 def _match_game(text: str) -> tuple[str | None, str]:
     """一段文字开头是不是游戏名。返回 (游戏, 剩下的部分)。"""
     low = (text or "").lower()
@@ -449,6 +475,24 @@ def parse_args(text: str) -> tuple[str | None, str | None, str, str]:
     if not parts:
         return None, None, "", "要查谁的？给我一个 UID，例如：uid 618285856"
 
+    # 「崩坏： 星穹铁道」这种在冒号后面断开了 —— 先粘回去。
+    # 不粘的话那个「崩坏：」会被当成角色名（实测：焦点变成 '崩坏：'）。
+    # 只在**下一段确实以游戏名开头**时才粘（「星穹铁道108931973」也算），
+    # 免得把正常文字也拼到一起。
+    glued: list[str] = []
+    i = 0
+    while i < len(parts):
+        cur = parts[i]
+        nxt = parts[i + 1] if i + 1 < len(parts) else ""
+        if cur.endswith(("：", ":")) and nxt and (
+                _alias_of(nxt) or _match_game(nxt)[0]):
+            glued.append(cur + nxt)
+            i += 2
+            continue
+        glued.append(cur)
+        i += 1
+    parts = glued
+
     # ---- 1) 先找 UID：优先长度像 UID 的那一段 ---------------------------
     uid: str | None = None
     at: tuple[int, int, int] | None = None      # (第几个词, 起, 止)
@@ -496,9 +540,12 @@ def parse_args(text: str) -> tuple[str | None, str | None, str, str]:
                     take(head)
             take(tail)
             continue
-        low = p.lower()
-        if game is None and low in ALIASES:
-            game = ALIASES[low]
+        g = _alias_of(p)
+        if g:
+            # **游戏名永远不当角色名** —— 即使游戏已经定下来了。
+            # 否则「崩坏： 星穹铁道 108931973」里第二个词会变成焦点。
+            if game is None:
+                game = g
             continue
         take(p)
 

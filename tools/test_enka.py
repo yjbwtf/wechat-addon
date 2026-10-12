@@ -63,6 +63,39 @@ for text in ("", "不是数字", "123", "12345678901", "原神"):
     check("%-14r 会被拒绝并给出人话" % text, u is None and bool(err),
           "得到 %r/%r/%r/%r" % (g, u, fo, err))
 
+# ---- 游戏名的各种叫法（用户要求把口语简写也认了）-----------------------
+print()
+print("游戏名的各种叫法")
+print()
+ALIAS_CASES = [
+    # 崩坏：星穹铁道 —— 口语简写特别多，官方名里还带个冒号
+    ("崩铁", "hsr"), ("星铁", "hsr"), ("星穹", "hsr"), ("铁道", "hsr"),
+    ("星轨", "hsr"), ("星穹铁道", "hsr"), ("崩坏星穹铁道", "hsr"),
+    ("崩坏：星穹铁道", "hsr"), ("崩坏:星穹铁道", "hsr"),
+    ("hsr", "hsr"), ("starrail", "hsr"), ("honkai", "hsr"),
+    ("honkaistarrail", "hsr"), ("sr", "hsr"), ("bht", "hsr"),
+    # 原神
+    ("原神", "gi"), ("原", "gi"), ("元神", "gi"), ("提瓦特", "gi"),
+    ("gi", "gi"), ("genshin", "gi"), ("ys", "gi"),
+    # 绝区零
+    ("绝区零", "zzz"), ("绝区", "zzz"), ("绝", "zzz"), ("zzz", "zzz"),
+    ("zenless", "zzz"), ("jql", "zzz"),
+]
+for word, want in ALIAS_CASES:
+    g, u, f, e = enka.parse_args("%s 108931973" % word)
+    check("%-16s -> %s" % (word, want), g == want, "得到 %r" % g)
+    # 和 UID 连在一起写也要认
+    g2, u2, f2, e2 = enka.parse_args("%s108931973" % word)
+    check("%-16s 连着 UID 也认" % word, g2 == want and u2 == "108931973",
+          "得到 %r/%r" % (g2, u2))
+
+check("官方名在冒号后面断开也认（「崩坏： 星穹铁道」）",
+      enka.parse_args("崩坏： 星穹铁道 108931973")[:3] == ("hsr", "108931973", ""),
+      str(enka.parse_args("崩坏： 星穹铁道 108931973")))
+check("游戏名**永远不当角色名**（即使游戏已经定下来了）",
+      enka.parse_args("崩坏：星穹铁道 星穹铁道 108931973")[2] == "",
+      str(enka.parse_args("崩坏：星穹铁道 星穹铁道 108931973")))
+
 # 只有游戏名没有数字时，提示里要能看出格式
 g, u, fo, err = enka.parse_args("原神")
 check("只写游戏名时提示格式", u is None and "UID" in err, repr(err))
