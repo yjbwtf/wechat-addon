@@ -442,7 +442,95 @@ function renderNav() {
   });
 }
 
-function renderFieldBlock(items, host) {
+// ------------------------------------------------------- 可折叠的「API 框」
+//
+// 一个 API 一个框：**默认收起**，点右边的箭头展开它下面的所有配置。
+// **一次只开一个** —— 展开 B 的时候自动把 A 收起来（手风琴）。
+//
+// 为什么要这样：功能性 API 会越加越多（账号查询、以后可能有天气/翻译/…），
+// 全铺开来一页几十个字段，找东西要靠翻。收起之后一页就是几个标题。
+//
+// 状态放在模块级（不是每个框自己一个变量）：手风琴天然是**互斥**的，
+// 状态必须在它们之间共享，不能让每个框各记各的。
+let openGroupKey = null;
+
+function makeGroup(it, pageName) {
+  const key = pageName + "|" + (it.title || "");
+  const box = document.createElement("section");
+  box.className = "group";
+
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "group-head";
+  head.setAttribute("aria-expanded", "false");
+  const title = document.createElement("span");
+  title.className = "group-title";
+  title.textContent = it.title || "";
+  const arrow = document.createElement("span");
+  arrow.className = "group-arrow";
+  arrow.textContent = "▾";
+  head.append(title, arrow);
+
+  // 折叠靠 max-height，不是 display:none —— 后者没法做过渡动画。
+  // 外层 overflow:hidden 负责裁掉超出部分（滑杆也是这么来的）。
+  const body = document.createElement("div");
+  body.className = "group-body";
+  const inner = document.createElement("div");
+  inner.className = "group-inner";
+  body.appendChild(inner);
+  renderFieldBlock(it.items || [], inner, pageName);
+
+  box.append(head, body);
+
+  let isOpen = false;
+
+  const setOpen = (open, animate) => {
+    isOpen = open;
+    box.classList.toggle("open", open);
+    head.setAttribute("aria-expanded", String(open));
+    if (!animate) {
+      // 首次渲染直接到位，别让整页在打开时自己动一下
+      body.style.transition = "none";
+      body.style.maxHeight = open ? "none" : "0px";
+      void body.offsetHeight;        // 强制回流，否则下面的 transition 复原会被合并
+      body.style.transition = "";
+      return;
+    }
+    if (open) {
+      body.style.maxHeight = body.scrollHeight + "px";
+      body.addEventListener("transitionend", (e) => {
+        if (e.propertyName !== "max-height" || !isOpen) return;
+        // 展开之后把 max-height 放开成 none：否则框里的内容（比如 rows 加了一行）
+        // 变高之后会被这个固定值切掉。
+        body.style.maxHeight = "none";
+      }, { once: true });
+    } else {
+      // 从 none 回到一个具体高度，不然没有起点、动画不会发生
+      body.style.maxHeight = body.scrollHeight + "px";
+      requestAnimationFrame(() => { body.style.maxHeight = "0px"; });
+    }
+  };
+
+  head.onclick = () => {
+    if (isOpen) {
+      openGroupKey = null;
+      setOpen(false, true);
+      return;
+    }
+    // 手风琴：先收掉当前开着的那个（可能是别的框）
+    document.querySelectorAll(".group.open").forEach((other) => {
+      if (other !== box && other._close) other._close();
+    });
+    openGroupKey = key;
+    setOpen(true, true);
+  };
+  box._close = () => setOpen(false, true);
+
+  setOpen(openGroupKey === key, false);
+  return box;
+}
+
+function renderFieldBlock(items, host, pageName) {
   let pending = null;
   const flush = () => {
     if (!pending) return;
@@ -462,7 +550,9 @@ function renderFieldBlock(items, host) {
       flush();
     } else {
       flush();
-      if (it.t === "head") {
+      if (it.t === "group") {
+        host.appendChild(makeGroup(it, pageName || ""));
+      } else if (it.t === "head") {
         const h = document.createElement("div");
         h.className = "sec-head";
         h.textContent = it.text;
@@ -631,7 +721,7 @@ function render() {
   if (page.name === "pg_status") {
     renderStatusPage(host);
   } else {
-    renderFieldBlock(page.items, host);
+    renderFieldBlock(page.items, host, page.name);
   }
 
   /* 给每个直接子元素编个号，CSS 用它算入场动画的延迟（依次浮现）。
