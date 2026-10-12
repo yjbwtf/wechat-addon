@@ -212,12 +212,49 @@ function makeRows(f) {
   const addRow = (cells = [], focus = false) => {
     const row = document.createElement("div");
     row.className = "row";
+    const boxes = [];
     parts.forEach((label, i) => {
       const box = document.createElement("input");
       box.type = "text";
       box.placeholder = label;
       box.value = cells[i] || "";
       box.oninput = writeBack;
+      // 粘贴整段时按行拆开，而不是把一整坨塞进一个框。
+      // 没有这个，从文本域换到现在这样就是**功能倒退** ——
+      // 原来一次粘贴十行群名，现在会变成一行里十个群名。
+      box.addEventListener("paste", (e) => {
+        const data = e.clipboardData || window.clipboardData;
+        const text = data ? data.getData("text") : "";
+        if (!/[\r\n]/.test(text)) return;   // 单行粘贴走浏览器默认行为
+        e.preventDefault();
+        const parsed = parse(text);
+        if (!parsed.length) return;
+        // **不覆盖已有内容**：这一行本来是空的就用它装第一行（免得留个空行），
+        // 本来有内容就整段插到它后面 —— 否则往一条已有记录上粘贴，
+        // 那条记录会被悄悄吃掉。
+        const here = boxes.some((b) => b.value.trim());
+        if (here) {
+          parsed.forEach((cells2) => addRow(cells2));
+          const first = row.nextSibling;
+          if (first && first.querySelector) {
+            const box2 = first.querySelector("input");
+            if (box2) box2.focus();
+          }
+        } else {
+          const first = parsed.shift() || [];
+          boxes.forEach((b, k) => { b.value = first[k] || ""; });
+          parsed.forEach((cells2) => addRow(cells2));
+          const last = list.lastElementChild;
+          if (last && ![...last.querySelectorAll("input")]
+                          .some((i) => i.value.trim())) {
+            // 尾巴那个空行已经不需要了
+            last.remove();
+          }
+        }
+        addRow([]);          // 尾巴上永远留一个空的
+        writeBack();
+      });
+      boxes.push(box);
       row.appendChild(box);
     });
     const del = document.createElement("button");
