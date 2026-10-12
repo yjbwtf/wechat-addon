@@ -514,6 +514,27 @@ try:
           (not ok5) and len(calls) == 1 and "限流" in msg5,
           "ok=%s calls=%s msg=%r" % (ok5, calls, msg5))
 
+    # **400 必须换下一个游戏试** —— 绝区零 UID 是 8 位，原神要 9 位，
+    # 自动识别第一个试的永远是原神 -> 400。原来 400 被当成致命错误直接返回，
+    # 结果 `/查询 14327029`（不写游戏名）永远失败。实测踩到。
+    def fetch_400_then_ok(game, uid, timeout=20):
+        calls.append((game, uid))
+        if game != "zzz":
+            raise enka.EnkaError("UID 格式不对（%s 不认这个位数）。"
+                                 % enka.GAME_LABEL.get(game, game))
+        return fake_fetch_ok(game, uid)
+
+    calls.clear()
+    cc8 = enka.Cache(tmp2 / "c8.json")
+    enka.fetch = fetch_400_then_ok
+    ok9, msg9 = enka.query(None, "14327029", Cfg(), cc8)
+    check("**400（位数不对）会换下一个游戏试，直到绝区零成功**",
+          ok9 and calls == [("gi", "14327029"), ("hsr", "14327029"),
+                            ("zzz", "14327029")],
+          "ok=%s calls=%s msg=%r" % (ok9, calls, msg9))
+    check("报错信息里带游戏名（否则用户以为是自己打错了）",
+          "原神" in enka.EnkaError("UID 格式不对（原神 不认这个位数）。").args[0])
+
     # 全 404
     calls.clear()
     cc5 = enka.Cache(tmp2 / "c5.json")

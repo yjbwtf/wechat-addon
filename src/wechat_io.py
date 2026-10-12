@@ -514,16 +514,37 @@ class WxAutoAdapter(BaseAdapter):
         if full and can_determine:
             log.debug("第 %d 轮：附带一次全量读取", self._cycle)
 
+        # **当前正开着的那个聊天也要读**，而且不用切窗口（它已经在前台了）。
+        #
+        # 为什么必须单独加这一条：微信的未读小红点**只在你不看那个聊天的时候
+        # 才出现**。用户正在群里打字时，微信认为这条已读 —— 没有小红点，
+        # 于是这个群会被下面的 `has_unread` 判成「跳过」，只能等下一次
+        # 全量扫描（默认 6 轮 ≈ 18 秒）。
+        #
+        # 实测踩过：用户在群里发完查询、发现没回复才去关机器人，
+        # 日志里**那条消息一个字都没有** —— 因为那几轮全在「跳过」它。
+        # 而机器人刚回过话的群恰恰就是当前开着的群，所以这条改动
+        # 覆盖的正是最常见的情况。
+        current = ""
+        if not full:
+            try:
+                name = self._chat_name()
+                if name and name in self.groups:
+                    current = name
+            except Exception as exc:  # noqa: BLE001
+                log.debug("读当前聊天失败（不影响其它群）：%s", exc)
+
         out: list[IncomingMessage] = []
         read: list[str] = []
         skipped: list[str] = []
         for group in self.groups:
             has_unread = (not can_determine) or (group in unread)
-            if not has_unread and not full:
+            if not has_unread and not full and group != current:
                 skipped.append(group)
                 continue
             got = self._read_group(group)
-            read.append(f"{group}({len(got)})")
+            read.append(f"{group}({len(got)})"
+                        + ("*" if group == current and not has_unread else ""))
             out.extend(got)
         # 这条日志是为了查「消息在眼皮底下却漏了」——那种情况日志里
         # 一条都没有，完全没法定位。有了它就能区分：

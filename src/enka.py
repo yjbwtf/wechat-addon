@@ -655,7 +655,11 @@ def fetch(game: str, uid: str, timeout: float = 20.0) -> dict:
         except Exception:  # noqa: BLE001
             pass
         if e.code == 400:
-            raise EnkaError("UID 格式不对，Enka 不认。") from e
+            # 400 = 这个游戏不认这个 UID 的位数（原神/星铁要 9 位，绝区零 8~9 位）。
+            # 报错里带上游戏名，否则自动识别时用户看到「UID 格式不对」
+            # 会以为自己打错了，其实是「第一个试的游戏不认」。
+            raise EnkaError("UID 格式不对（%s 不认这个位数）。"
+                            % GAME_LABEL.get(game, game)) from e
         if e.code == 404:
             raise EnkaError(
                 "查不到这个玩家。可能是：UID 写错了 / 服务器不对 / 没开过角色展柜。"
@@ -1071,9 +1075,15 @@ def query(game: str | None, uid: str, cfg, cache: Cache,
             data = fetch(g, uid, timeout=getattr(cfg, "timeout_seconds", 20))
         except EnkaError as exc:
             last_err = str(exc)
-            # 只有「查不到」才值得换下一个游戏试；
-            # 限流 / 维护 / 网络问题换游戏也一样，直接回报
-            if "查不到这个玩家" not in last_err:
+            # 这两种值得换下一个游戏试：
+            #   · 404「查不到这个玩家」—— 可能是别的游戏的 UID
+            #   · 400「UID 格式不对」—— 这个游戏不认这个**位数**
+            #     绝区零的 UID 是 8 位，原神要 9 位：自动识别时第一个试的
+            #     永远是原神，直接 400。**原来 400 被当成致命错误直接返回，
+            #     结果 `/查询 14327029`（不写游戏名）永远失败** —— 实测踩到。
+            # 限流 / 维护 / 网络问题换游戏也一样，直接回报。
+            if not ("查不到这个玩家" in last_err
+                    or "UID 格式不对" in last_err):
                 return False, last_err
             continue
         parsed = parse_payload(g, data)
