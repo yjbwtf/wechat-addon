@@ -407,6 +407,27 @@ def _match_game(text: str) -> tuple[str | None, str]:
     return None, text
 
 
+def _is_noise(tok: str) -> bool:
+    """是不是该丢掉的杂词：**一个中文都没有**的片段。
+
+    角色名都是中文（各游戏的 loc 表里就是中文），所以纯 ASCII 的片段基本是
+    命令行习惯的残留：`UID`、`\\uid`（两个反斜杠是老写法，前缀只吃一个，
+    会剩一个下来）、`-`、`.` 这些。
+
+    实测踩过两次：
+      · `UID137602053` -> 那个 `UID` 混进角色名，回「没找到「UID 可莉」」
+      · `\\\\uid 137602053` -> 剩下一个 `\\`，焦点变成 `\\uid`
+
+    带中文的都要留着：`11号`、`银狼LV.999`、`「席德」` 都是真角色名。
+    """
+    t = str(tok or "").strip()
+    if not t:
+        return True
+    if t.lower() in ALIASES:
+        return False
+    return not any(ord(ch) > 127 for ch in t)
+
+
 def parse_args(text: str) -> tuple[str | None, str | None, str, str]:
     """解析 `[游戏] <uid> [角色名]`。返回 (游戏, uid, 角色名, 错误说明)。
 
@@ -457,6 +478,12 @@ def parse_args(text: str) -> tuple[str | None, str | None, str, str]:
     # ---- 2) 游戏名和角色名 ---------------------------------------------
     game: str | None = None
     names: list[str] = []
+
+    def take(part: str) -> None:
+        """收下一个角色名片段，杂词（UID 这种）直接丢。"""
+        if part and not _is_noise(part):
+            names.append(part)
+
     for i, p in enumerate(parts):
         if at and i == at[0]:
             head, tail = p[:at[1]], p[at[2]:]
@@ -464,18 +491,16 @@ def parse_args(text: str) -> tuple[str | None, str | None, str, str]:
                 g, rest = _match_game(head)
                 if g and game is None:
                     game = g
-                    if rest:
-                        names.append(rest)
+                    take(rest)
                 else:
-                    names.append(head)
-            if tail:
-                names.append(tail)
+                    take(head)
+            take(tail)
             continue
         low = p.lower()
         if game is None and low in ALIASES:
             game = ALIASES[low]
             continue
-        names.append(p)
+        take(p)
 
     if not _UID_LEN[0] <= len(uid) <= _UID_LEN[1]:
         # Enka 对格式不对的 UID 直接 400；本地先拦一道，省一次请求

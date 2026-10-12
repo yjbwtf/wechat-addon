@@ -298,6 +298,50 @@ class Gatekeeper:
             return None
         return text[len(prefix):].strip()
 
+    def strip_command_words(self, body: str, words: list[str]) -> str:
+        """把指令词从正文里剥掉，返回真正的参数部分。
+
+        **这段逻辑踩过两次坑，别改回去**：
+
+        1. 原来分两条路：有空格时用 `command_args`（它把第一个词**整个丢掉**），
+           没空格时只取第一个词。结果「查询原神 137602053 可莉」里的 UID 和
+           角色名会被扔掉。
+        2. 只剥**第一个词**也不够。用户实际发过
+           `@机器人 /查 原神 UID137602053 可莉`（他的触发词里有「查」），
+           第一个词「查」剥掉了，后面还留着一个「UID」—— 它也是指令词，
+           最后被当成角色名的一部分，回了一句「没找到「UID 可莉」」。
+
+        但也不能见一个剥一个：用户如果把某个角色名也加进触发词
+        （比如绝区零的「雅」），`/查询 14327029 雅` 里的「雅」会被吃掉。
+        所以**只剥到 UID 那个词为止** —— 它之后的都是角色名，一概不动。
+
+        `tools/check_command.py` 用的就是这个函数，所以「脚本说会怎样」
+        和「机器人实际怎样」不会分叉。
+        """
+        toks = [t for t in re.split(r"[\s,，。!！?？|]+", (body or "").strip()) if t]
+        if not toks:
+            return ""
+
+        # UID 大概在第几个词：第一个含 6~10 位数字段的词
+        uid_at = 0
+        for i, tok in enumerate(toks):
+            if any(6 <= len(m.group()) <= 10 for m in re.finditer(r"\d+", tok)):
+                uid_at = i
+                break
+
+        clean: list[str] = []
+        for i, tok in enumerate(toks):
+            if i <= uid_at:
+                low = tok.lower()
+                for w in sorted({str(w).strip() for w in (words or [])
+                                 if str(w).strip()}, key=len, reverse=True):
+                    if low.startswith(w.lower()):
+                        tok = tok[len(w):]
+                        break
+            if tok:
+                clean.append(tok)
+        return " ".join(clean).strip()
+
     def is_trusted_chat(self, group: str) -> bool:
         """这个会话是不是「可信会话」（免 @、免口令）。
 
