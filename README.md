@@ -1350,6 +1350,35 @@ powershell -ExecutionPolicy Bypass -File tools\setup_elevated.ps1
 
 `\agent` 指令**不受这个开关影响** —— 它走自己的 `wechat-agent` profile。
 
+### 哪些会跟着换、哪些不会
+
+| 链路 | 跟不跟档位 | 为什么 |
+|---|---|---|
+| 群聊回复 | **跟** | 用的是 `self.brain`，就是 `dsh.model_preset` 管的那条 |
+| `\agent` | **不跟** | `AgentRunner` 自己 new 了一个 `DshConfig`，见下 |
+| 梗库定时更新 | **跟** | 它复用 `self.brain`（要联网搜索才能捞梗），所以跟着走 |
+
+`\agent` 那条是**显式钉死**的，不是碰巧：
+
+```python
+# src/agent.py
+agent_dsh = DshConfig(
+    command=dsh.command,
+    profile=cfg.profile,          # wechat-agent
+    timeout_seconds=...,
+    model_preset="deepseek",      # 意思就是「不加 --patch」
+)
+```
+
+这里 `model_preset="deepseek"` 读起来有点绕，它的真实含义是**「不加叠加层」**，
+于是用的就是 `wechat-agent` profile 里配的 `deepseek-account` / `deepseek-flash`。
+
+为什么要显式写：`DshConfig` 的默认值**恰好也是** `deepseek`，所以「不写」也能对 ——
+但那是巧合。哪天有人改了默认值，或者顺手把整个 `cfg.dsh` 传进来，agent 就会悄悄
+跟着闲聊换模型，而这条链路上跑的是**完整文件系统和命令行权限**，不该有这种意外。
+`tools/test_model_preset.py` 里有三条断言钉着它（不吃叠加层、不被塞智谱的 Key、
+走自己的 profile）。
+
 ### 为什么换模型不用重启，也不用复制 profile
 
 `dsh` 支持 `--patch <文件>`：在 profile 之上再叠一层覆盖。所以：

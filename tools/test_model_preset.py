@@ -82,6 +82,26 @@ try:
 except Exception as exc:  # noqa: BLE001
     check("Brain 和 cfg 共享同一个 DshConfig（热切换的前提）", False, repr(exc))
 
+# 4c) **\agent 绝不能被闲聊档位带着走。**
+#     这条链路上跑的是完整工具链（读写文件、跑命令），模型不该因为
+#     界面上切了个下拉框就变。用人话讲：闲聊换模型，agent 照旧。
+try:
+    from src.agent import AgentRunner  # noqa: PLC0415
+    from src.config import AgentConfig  # noqa: PLC0415
+
+    chat = DshConfig(command="dsh", profile="wechat", model_preset="zhipu",
+                     zhipu_api_key="dummy")
+    runner = AgentRunner(AgentConfig(enabled=True), chat, ROOT)
+    check("agent 不吃闲聊的叠加层",
+          mp.launch_args(runner.brain.cfg) == [],
+          "得到 %r" % (mp.launch_args(runner.brain.cfg),))
+    check("agent 不会被塞智谱的 Key",
+          mp.env_overrides(runner.brain.cfg) == {})
+    check("agent 走的是自己的 profile",
+          runner.brain.cfg.profile == "wechat-agent")
+except Exception as exc:  # noqa: BLE001
+    check("agent 不吃闲聊的叠加层", False, repr(exc))
+
 # 5) 叠加层文件不存在时：不加参数、不抛异常（宁可退回默认模型，也别不回复）
 missing = Cfg("zhipu", preset_dir=str(ROOT / "dsh" / "不存在的目录"))
 try:

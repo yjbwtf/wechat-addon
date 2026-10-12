@@ -61,10 +61,27 @@ class AgentRunner:
         self.secret_present = bool(secret_present)
         self.audit_path = self.root / (cfg.audit_file or "data/agent_audit.jsonl")
         # 复用 Brain：只是换 profile、换 cwd、多塞一个环境变量
+        #
+        # **这里的模型是钉死的，故意不跟「闲聊模型」档位走。**
+        # 档位（config.yaml 的 dsh.model_preset）只作用于 self.brain，也就是
+        # 群聊回复；`\agent` 是「在本机上干活」的通道，用的是 wechat-agent
+        # profile 自己的能力，跟闲聊用哪个模型没关系。
+        #
+        # model_preset="deepseek" 的含义是「不加 --patch」—— 于是用的就是
+        # wechat-agent profile 里配的 deepseek-account / deepseek-flash。
+        # **不是**「agent 用 deepseek 这个档位」，这个档位名在这里只是
+        # 「不加叠加层」的同义词（见 src/model_preset.py 的 PRESETS）。
+        #
+        # 为什么要显式写出来：DshConfig 的默认值恰好也是 deepseek，所以
+        # 「不写」也能对。但那是**巧合**，不是设计 —— 哪天有人改了默认值，
+        # 或者顺手把 cfg.dsh 整个传进来，agent 就会悄悄跟着闲聊换模型，
+        # 而这条链路上跑的是危险权限，不该有这种意外。
+        # tools/test_model_preset.py 里钉了一条断言。
         agent_dsh = DshConfig(
             command=dsh.command,
             profile=cfg.profile,
             timeout_seconds=max(30, int(cfg.timeout_seconds)),
+            model_preset="deepseek",
         )
         cwd = Path(cfg.cwd) if cfg.cwd else self.root
         self.brain = Brain(
