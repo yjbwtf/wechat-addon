@@ -41,7 +41,7 @@ from .splitter import split_reply
 from .style import apply_style, load_style
 from .threads import ThreadBook
 from .wechat_io import BaseAdapter, IncomingMessage, build_adapter
-from .procutil import pid_alive
+from .procutil import detached_flags, pid_alive
 
 
 def setup_logging(cfg: Config) -> None:
@@ -95,6 +95,60 @@ def format_history(messages: list[StoredMessage], per_message_chars: int = 120) 
             text = text[:per_message_chars] + "…"
         lines.append(f"- {who}: {text}")
     return "\n".join(lines)
+
+
+#: 匹配课程名时要剥掉的**开头**词（「刷课 帮我开一下舞台」）。
+#: 只在开头剥，而且只在原样匹配失败之后才剥 —— 否则课名里带「开」的
+#: （比如「开放大学英语」）会被误伤成「放大学英语」。
+_COURSE_LEAD = ("帮我", "给我", "开个", "打开", "开一下", "开", "刷课",
+                "上课", "挂课", "一下", "那个")
+
+
+def _course_contains(courses: list[dict], want: str) -> dict | None:
+    """双向包含匹配。want 为空、或条目没名字，一律跳过。
+
+    **空名字必须跳过**：`"" in "任何字符串"` 恒为真，一个写坏了的条目
+    （只有 url 没有 name）会把所有输入都吃掉 —— 测试抓到的。
+    """
+    if not want:
+        return None
+    for c in courses or []:
+        name = str(c.get("name", "")).strip().lower()
+        if not name:
+            continue
+        if want in name or name in want:
+            return c
+    return None
+
+
+def match_course(courses: list[dict], arg: str) -> dict | None:
+    """按名字找课程。找不到返回 None。
+
+    双向包含是刻意的：用户写「舞台」要能命中「舞台人生」（课名包含输入），
+    把全名写全时也要能命中（输入包含课名）。只做单向的话，
+    「刷课 舞台人生（2026春）」这种写法就匹配不上。
+
+    **先原样匹配，失败才剥开头词。** 顺序反过来会误伤课名本身
+    （「开放大学」被剥成「放大学」）。
+    """
+    raw = (arg or "").strip().lower()
+    if not raw:
+        return None
+    hit = _course_contains(courses, raw)
+    if hit:
+        return hit
+
+    stripped = raw
+    while True:
+        for w in _COURSE_LEAD:
+            if stripped.startswith(w) and len(stripped) > len(w):
+                stripped = stripped[len(w):].strip()
+                break
+        else:
+            break
+    if stripped and stripped != raw:
+        return _course_contains(courses, stripped)
+    return None
 
 
 class Bot:
@@ -175,7 +229,7 @@ class Bot:
         action = self.gate.classify_command(
             self.gate.strip_secret(body),
             {"agent": self.cfg.agent.words, "shot": self.cfg.screenshot.words,
-             "launch": self.cfg.launch.words},
+             "launch": self.cfg.launch.words, "brush": self.cfg.brush.words},
         )
 
         if not self.gate.authorize_command(msg.sender, msg.identity):
@@ -214,7 +268,8 @@ class Bot:
             # 所以回一句提示。因为已经过了鉴权，这不泄露任何机制。
             logging.info("收到无法识别的指令：[%s] %s -> %r", msg.group, msg.sender, body[:30])
             words = self.gate.command_words(
-                {"agent": self.cfg.agent.words, "shot": self.cfg.screenshot.words})
+                {"agent": self.cfg.agent.words, "shot": self.cfg.screenshot.words,
+                 "launch": self.cfg.launch.words, "brush": self.cfg.brush.words})
             try:
                 self.adapter.send(
                     msg.group,
@@ -251,6 +306,11 @@ class Bot:
             return True
         elif action == "launch":
             self._run_async("开程序", msg, self.handle_launch, body)
+            return True
+        elif action == "brush":
+            # 这条**不进后台线程**：它只是一次「让系统打开一个网址」，
+            # 毫秒级返回，比开程序还快。走后台线程反而多一层队列。
+            self.handle_brush(msg, body)
             return True
         else:
             state = "暂停中" if (self.paused or self.stop.stopped) else "运行中"
@@ -444,6 +504,141 @@ class Bot:
         emit(msg.group, text)
 
     # ------------------------------------------------------------------ 截图
+    def _ask(self, prompt: str, *, user: str = "", group: str = "") -> str:
+        """调大脑。**免费档失败时回退到 DSH 账号重试一次。**
+
+        为什么需要（实测）：2026-10-12 15:01 智谱返回 429 / code 1305
+        「该模型当前访问量过大」，DSH 内置重试跑满 5 次、17 秒后仍失败 ——
+        然后那条消息就被丢掉了，一个字都没回。免费模型被挤爆是常态，
+        沉默不是可接受的失败方式。
+
+        实现上直接原地改 `self.cfg.dsh.model_preset` 再改回来：
+        `Brain.cfg` 和 `self.cfg.dsh` 是**同一个对象**（Brain 存的是引用），
+        而 `launch_args()` / `env_overrides()` 是每次调用现读的，
+        所以这个改法立刻生效。这条不变量有测试钉着
+        （tools/test_model_preset.py：「Brain 和 cfg 共享同一个 DshConfig」）。
+
+        注意 `\\agent` 不受影响：它用的是 AgentRunner 自己 new 的 DshConfig。
+        """
+        try:
+            return self.brain.ask(prompt, user=user, group=group)
+        except BrainError as exc:
+            target = model_preset.fallback_preset(self.cfg.dsh)
+            if not target:
+                raise
+            logging.warning("主模型失败（%s），回退到 %s 再试一次",
+                            exc, model_preset.describe(self.cfg.dsh))
+            saved = self.cfg.dsh.model_preset
+            try:
+                self.cfg.dsh.model_preset = target
+                reply = self.brain.ask(prompt, user=user, group=group)
+            finally:
+                # 一定要改回去：档位是用户选的，兜底只影响这一次调用。
+                self.cfg.dsh.model_preset = saved
+            logging.info("回退成功，这次的回复是 %s 给的",
+                         model_preset.describe(self.cfg.dsh))
+            return reply
+
+    def handle_brush(self, msg: IncomingMessage, body: str,
+                     emit=None) -> None:
+        """`\\刷课 <课程>`：用你自己的浏览器打开课程页。
+
+        **为什么单独一条指令、而且完全不碰 LLM：**
+
+        刷课本身是确定性操作 —— 打开对的页面，剩下的由油猴脚本完成
+        （它自己会解析任务点、播视频、往下一节走）。走 `\\agent` 的代价是
+        每次十几秒、几十步工具调用、几千 token，而且实测有两个硬伤：
+
+          1. agent 用 Start-Process 起的浏览器，会在指令结束的瞬间被回收
+             （实测：起的 cmd 在 dsh 退出后立刻查不到）。
+          2. 为了让它活下来，就得由 agent 之外的东西去起浏览器；而 Edge 的
+             调试口**只能在启动时加**，于是 agent 会去杀用户正在用的浏览器。
+
+        这里两个问题都不存在：浏览器是用户**自己的进程**，机器人只是让
+        系统按 URL 关联把它打开，所以既不会被回收，也不需要调试口，
+        更不会碰到任何浏览器配置。
+
+        课程名支持 Substring 匹配（「刷课 舞台」能命中「舞台人生」）；
+        也可以直接给一个 URL。
+        """
+        if emit is None:
+            emit = self._say
+        cfg = self.cfg.brush
+        if not cfg.enabled:
+            logging.info("刷课指令未开启")
+            return
+
+        arg = self.gate.strip_secret(self.gate.command_args(body)).strip()
+        if not arg:
+            # 和 `\\开` 一样：指令词可能和课程名连在一起写（「刷课舞台人生」）
+            first = re.split(r"[\s,，。!！?？|]+",
+                             self.gate.strip_secret(body).strip())[0]
+            for w in sorted(cfg.words, key=len, reverse=True):
+                if first.lower().startswith(str(w).lower()):
+                    arg = first[len(str(w)):].strip()
+                    break
+            else:
+                arg = first
+
+        if not arg:
+            if cfg.courses:
+                names = "、".join(c["name"] for c in cfg.courses)
+                emit(msg.group, f"刷哪门？\n{names}\n"
+                                f"（也可以直接给网址：{cfg.words[0]} https://…）",
+                     split=False)
+            else:
+                emit(msg.group,
+                     f"还没配课程。在 config.yaml 的 brush.courses 里加一条：\n"
+                     f"  - name: 课程名\n    url: https://…\n"
+                     f"或者直接给网址：{cfg.words[0]} https://…",
+                     split=False)
+            return
+
+        # 直接给了网址就用网址，否则按名字找
+        url = ""
+        name = arg
+        if re.match(r"^https?://", arg, re.I):
+            url = arg
+            name = ""
+        else:
+            hit = match_course(cfg.courses, arg)
+            if hit is None:
+                names = "、".join(c["name"] for c in cfg.courses) or "（还没配课程）"
+                emit(msg.group, f"没找到「{arg}」。可用的：{names}", split=False)
+                logging.info("刷课：匹配不到课程 %r", arg)
+                return
+            url = hit["url"]
+            name = hit["name"]
+
+        if not self._open_url(url, cfg.browser):
+            emit(msg.group, "打开失败了，看看日志。", split=False)
+            return
+        logging.warning("刷课 [%s] %s -> %s", msg.group, msg.sender, name or url)
+        emit(msg.group, f"开了：{name or url}\n页面里的脚本会自己往下跑；"
+                        f"要停就把那个标签页关掉。", split=False)
+
+    def _open_url(self, url: str, browser: str = "") -> bool:
+        """让系统（或指定浏览器）打开一个 URL。
+
+        用 DETACHED 起，保证浏览器活得比本进程久；机器人是 pythonw
+        （没有控制台），不加 no_window() 的话某些控制台助手会闪黑框 ——
+        这个坑今天已经在 schtasks/taskkill 上踩过了。
+        """
+        try:
+            if browser:
+                argv = [browser, url]
+            else:
+                # os.startfile 走系统 URL 关联：用户默认用什么浏览器就用什么，
+                # 不会像写死 msedge 那样把 Chrome 用户也拽到 Edge 上。
+                os.startfile(url)      # noqa: S606
+                return True
+            subprocess.Popen(argv, close_fds=True,
+                             creationflags=detached_flags())
+            return True
+        except OSError as exc:
+            logging.error("打开 %s 失败：%s", url, exc)
+            return False
+
     def handle_launch(self, msg: IncomingMessage, body: str,
                       emit=None) -> None:
         """`\\开 <程序>`：启动一个预授权的程序（需要管理员权限的那些）。
@@ -644,9 +839,9 @@ class Bot:
         )
 
         try:
-            reply = self.brain.ask(prompt, user=msg.sender, group=msg.group)
+            reply = self._ask(prompt, user=msg.sender, group=msg.group)
         except BrainError as exc:
-            logging.error("生成失败：%s", exc)
+            logging.error("生成失败（回退也失败了）：%s", exc)
             return
 
         self.deliver(msg.group, msg.sender, text, reply, empty_trigger=not text)
@@ -829,9 +1024,9 @@ class Bot:
         )
 
         try:
-            reply = self.brain.ask(prompt, user=turn.trigger_sender, group=turn.group)
+            reply = self._ask(prompt, user=turn.trigger_sender, group=turn.group)
         except BrainError as exc:
-            logging.error("生成失败：%s", exc)
+            logging.error("生成失败（回退也失败了）：%s", exc)
             return
 
         # 靠启发式接上的消息，允许模型自己说「这条不是跟我说的」

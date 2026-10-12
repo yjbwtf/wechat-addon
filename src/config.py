@@ -120,6 +120,29 @@ class LaunchConfig:
 
 
 @dataclass
+class BrushConfig:
+    """`\\刷课 <课程>`：在自己的浏览器里打开课程页。
+
+    **故意不走 LLM。** 刷课这件事是确定性的：打开对的页面，剩下交给油猴脚本。
+    走 agent 的代价是每刷一次十几秒、几十步工具调用、几千 token，
+    而且 agent 起的浏览器会在指令结束时被回收（这个已经实测确认过），
+    它为了拿到调试口还会去杀用户的浏览器 —— 全都绕着这一个「打开页面」转。
+
+    所以这里只做一件事：用系统默认浏览器打开一个 URL。
+    浏览器是用户自己的进程，不会被回收；油猴脚本照常工作；
+    不碰任何浏览器配置，也没有调试口要守。
+    """
+
+    enabled: bool = True
+    words: list[str] = field(default_factory=lambda: ["刷课", "上课", "挂课"])
+    #: 浏览器可执行文件。留空 = 让系统按 URL 关联自己去开（最省事，也不挑浏览器）。
+    browser: str = ""
+    #: [{"name": "舞台人生", "url": "https://..."}] —— 名字用 Substring 匹配，
+    #: 「刷课 舞台」就能命中「舞台人生」。
+    courses: list[dict] = field(default_factory=list)
+
+
+@dataclass
 class LogsConfig:
     """日志的定期清理。
 
@@ -359,6 +382,7 @@ class Config:
     memes: MemeConfig
     memes_update: AutoUpdateConfig
     launch: LaunchConfig
+    brush: BrushConfig
     poll: PollConfig
     logs: LogsConfig
     threads: ThreadConfig
@@ -507,6 +531,23 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         words=list(la_raw.get("words") or ["开", "打开", "开个", "开一下", "帮我开", "launch", "open"]),
     )
 
+    br_raw = _section(raw, "brush")
+    brush = BrushConfig(
+        enabled=bool(br_raw.get("enabled", True)),
+        words=[str(w) for w in
+               (br_raw.get("words") or ["刷课", "上课", "挂课"])],
+        browser=str(br_raw.get("browser", "") or ""),
+        # 只保留同时有 name 和 url 的条目 —— 写坏一条不该让整个指令不可用。
+        courses=[
+            {"name": str(c.get("name", "")).strip(),
+             "url": str(c.get("url", "")).strip()}
+            for c in (br_raw.get("courses") or [])
+            if isinstance(c, dict)
+            and str(c.get("name", "")).strip()
+            and str(c.get("url", "")).strip()
+        ],
+    )
+
     mu_raw = _section(raw, "memes_update")
     memes_update = AutoUpdateConfig(
         enabled=bool(mu_raw.get("enabled", True)),
@@ -618,6 +659,7 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         memes=memes,
         memes_update=memes_update,
         launch=launch,
+        brush=brush,
         poll=poll,
         logs=logs,
         threads=threads,

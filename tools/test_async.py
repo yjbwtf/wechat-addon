@@ -8,14 +8,17 @@
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
-sys.path.insert(0, r"ROOT")
+# 原来是 sys.path.insert(0, r"ROOT") —— 没被替换的占位符，测试一直跑不起来。
+# 见 tools\test_dedup.py 里的同一处说明。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.config import load_config
-from src.main import Bot
-from src.policy import make_msg_key
-from src.wechat_io import IncomingMessage, build_adapter
+from src.config import load_config  # noqa: E402
+from src.main import Bot  # noqa: E402
+from src.policy import make_msg_key  # noqa: E402
+from src.wechat_io import IncomingMessage, build_adapter  # noqa: E402
 
 cfg = load_config()
 cfg.whitelist_groups = ["test"]
@@ -28,6 +31,18 @@ cfg.db_path = cfg.data_dir / "_t.sqlite3"
 stop = cfg.data_dir / "STOP"
 had = stop.exists()
 stop.unlink(missing_ok=True)
+
+# 口令**从配置里读**，不要硬编码。这里原来写死了 "ccb"，而 config.yaml 里
+# 后来改成了别的词 —— 于是口令校验不通过、指令被静默吞掉，测试报
+# 「实际调用了 0 次」。那不是代码坏了，是测试跟不上配置。
+SECRET = (cfg.commands.secret or "").strip()
+
+# 同理，把这个测试**不关心**的闸门全部放行：它的主题是「耗时指令会不会
+# 阻塞主循环」，不是鉴权。发送者 10001 不在用户的 allowed_senders 里，
+# 不放开的话指令会被静默忽略，测的就成了鉴权规则。
+cfg.commands.allowed_senders = ["10001"]
+cfg.commands.verify_identity = False
+cfg.commands.identity_mode = "any"
 
 adapter = build_adapter(cfg, console=True)
 bot = Bot(cfg, adapter)
@@ -69,7 +84,7 @@ print("=" * 74)
 print(f"1) 发一条 agent 指令，看 handle() 是否立刻返回（桩要睡 {SLEEP:.0f} 秒）")
 print("=" * 74)
 t0 = time.time()
-feed(r"\\agent 测试任务 ccb")
+feed(rf"\\agent 测试任务 {SECRET}")
 dt = time.time() - t0
 print(f"  handle() 耗时 {dt:.3f}s")
 blocked = dt > 1.0
@@ -80,7 +95,7 @@ print("=" * 74)
 print("2) 第一个还在跑时，再发一条 —— 应被锁拒绝")
 print("=" * 74)
 t0 = time.time()
-feed(r"\\agent 第二个任务 ccb")
+feed(rf"\\agent 第二个任务 {SECRET}")
 print(f"  handle() 耗时 {time.time()-t0:.3f}s")
 time.sleep(0.3)
 bot._drain_outbox()

@@ -115,3 +115,22 @@ def describe(cfg) -> str:
     if name == "zhipu":
         return "zhipu / glm-4.7-flash（免费）"
     return "deepseek / profile 自带（按量计费）"
+
+
+def fallback_preset(cfg) -> str | None:
+    """主模型失败时用来兜底的档位。已经在默认档就返回 None（没得退）。
+
+    **这不是「自动挑模型」。** 档位仍然完全由用户手动决定；
+    这里只在一次调用**彻底失败**之后退一步重试，理由是实测算出来的：
+
+        2026-10-12 15:01  智谱返回 429 / code 1305「该模型当前访问量过大」
+        DSH 内置重试跑满 5 次、17 秒后仍然失败
+        然后 main.py 只记一行 ERROR —— 那条消息一个字都没回
+
+    免费模型被挤爆是常态，而「沉默」不是可接受的失败方式。回退一次的花费
+    是 DSH 账号那边的一条群聊消息（不到一分钱），换来的是不石沉大海。
+    """
+    name = normalize(getattr(cfg, "model_preset", DEFAULT_PRESET))
+    if name == DEFAULT_PRESET:
+        return None
+    return DEFAULT_PRESET

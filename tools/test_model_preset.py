@@ -115,6 +115,68 @@ custom = Cfg("zhipu", preset_dir=str(ROOT / "dsh"))
 check("preset_dir 生效",
       Path(mp.launch_args(custom)[1]).parent == ROOT / "dsh")
 
+# 7) **失败兜底**：免费档挂了要退到 DSH 账号重试，而不是石沉大海。
+#    起因是实测：智谱返回 429/1305，DSH 内置重试跑满 5 次仍失败，
+#    然后那条消息一个字都没回。
+print()
+print("失败兜底")
+print()
+check("zhipu 档可以退", mp.fallback_preset(Cfg("zhipu")) == "deepseek")
+check("已经在默认档就不退（没得退）", mp.fallback_preset(Cfg("deepseek")) is None)
+
+try:
+    from src.brain import BrainError          # noqa: PLC0415
+    from src.main import Bot                  # noqa: PLC0415
+
+    class StubBrain:
+        """第一次调失败，第二次成功；顺便记下每次调用时看到的档位。"""
+
+        def __init__(self, failures: int = 1):
+            self.failures = failures
+            self.seen: list[str] = []
+
+        def ask(self, prompt, **kw):
+            self.seen.append(self.cfg.model_preset)
+            if self.failures > 0:
+                self.failures -= 1
+                raise BrainError('429: {"code":"1305","message":"访问量过大"}')
+            return "兜底成功"
+
+    def make_bot(preset: str):
+        # 跳过 __init__（那要建数据库、适配器），只装 _ask 需要的东西
+        bot = object.__new__(Bot)
+        bot.cfg = type("C", (), {})()
+        bot.cfg.dsh = DshConfig(command="dsh", profile="wechat",
+                                model_preset=preset)
+        bot.brain = StubBrain()
+        bot.brain.cfg = bot.cfg.dsh      # 和真 Brain 一样：存的是引用
+        return bot
+
+    b = make_bot("zhipu")
+    out = Bot._ask(b, "在吗")
+    check("第一次失败后用 deepseek 重试成功", out == "兜底成功", "得到 %r" % (out,))
+    check("两次调用看到的档位是 zhipu -> deepseek",
+          b.brain.seen == ["zhipu", "deepseek"], "得到 %r" % (b.brain.seen,))
+    check("**兜底之后档位要改回去**（不能把用户的选择改掉）",
+          b.cfg.dsh.model_preset == "zhipu",
+          "得到 %r" % (b.cfg.dsh.model_preset,))
+
+    b2 = make_bot("deepseek")
+    b2.brain.failures = 1
+    try:
+        Bot._ask(b2, "在吗")
+        check("默认档失败时不重试（没得退）", False, "居然没抛异常")
+    except BrainError:
+        check("默认档失败时不重试（没得退）", b2.brain.seen == ["deepseek"],
+              "调用序列 %r" % (b2.brain.seen,))
+
+    b3 = make_bot("zhipu")
+    b3.brain.failures = 0
+    check("第一次就成功时不重试", Bot._ask(b3, "在吗") == "兜底成功"
+          and b3.brain.seen == ["zhipu"], "得到 %r" % (b3.brain.seen,))
+except Exception as exc:  # noqa: BLE001
+    check("失败兜底", False, repr(exc))
+
 failed = [c for c in cases if not c[1]]
 print()
 if failed:

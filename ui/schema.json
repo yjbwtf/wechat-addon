@@ -1067,6 +1067,42 @@
    "on": null,
    "off": null,
    "page": "adv"
+  },
+  {
+   "index": 87,
+   "key": "config:brush.enabled",
+   "label": "启用 \\刷课 指令",
+   "hint": "开启后，授权的人发 \\刷课 舞台 就用**你自己的浏览器**打开课程页，剩下的交给油猴脚本。**不走模型** —— 毫秒级返回，不花 token，不碰任何浏览器配置。",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "owner"
+  },
+  {
+   "index": 88,
+   "key": "config:brush.words",
+   "label": "刷课触发词",
+   "hint": "每行一个。支持连写（刷课舞台）。",
+   "kind": "list",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
+  },
+  {
+   "index": 89,
+   "key": "config:brush.browser",
+   "label": "刷课用哪个浏览器",
+   "hint": "留空 = 用系统默认浏览器（推荐：不漏痕迹、不挑浏览器）。填完整路径就写死某个浏览器，例如 C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe。",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "owner"
   }
  ],
  "pages": [
@@ -1554,6 +1590,18 @@
     {
      "t": "field",
      "index": 77
+    },
+    {
+     "t": "field",
+     "index": 87
+    },
+    {
+     "t": "field",
+     "index": 88
+    },
+    {
+     "t": "field",
+     "index": 89
     }
    ],
    "title": "权限"

@@ -16,12 +16,18 @@ widgets: type='text' 文本 / type='system' 时间戳 / type='image' 机器人�
 """
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
-sys.path.insert(0, r"ROOT")
+# 这里原来是 `sys.path.insert(0, r"ROOT")` —— 一个**没被替换掉的占位符**。
+# 后果是 `python tools\test_dedup.py` 必然报
+# ModuleNotFoundError: No module named 'src'，这个测试一直是**跑不起来**的。
+# 注意 sys.path[0] 是「脚本所在目录」（tools\），不是当前工作目录，
+# 所以必须自己把仓库根加进去。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.config import load_config
-from src.wechat_io import WxAutoAdapter
+from src.config import load_config  # noqa: E402
+from src.wechat_io import WxAutoAdapter  # noqa: E402
 
 cfg = load_config()
 
