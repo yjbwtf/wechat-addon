@@ -24,7 +24,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from src.procutil import pid_alive
+from src.procutil import no_window, pid_alive
 
 ROOT = Path(__file__).resolve().parent
 PID_PATH = ROOT / "data" / "bot.pid"
@@ -100,7 +100,8 @@ def kill_bots() -> list[int]:
         try:
             if os.name == "nt":
                 subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                               capture_output=True, timeout=10)
+                               capture_output=True, timeout=10,
+                               creationflags=no_window())
             else:
                 os.kill(pid, 15)
             killed.append(pid)
@@ -117,6 +118,10 @@ def kill_bots() -> list[int]:
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
                  "-Command", script],
                 capture_output=True, text=True, timeout=40,
+                # 本脚本是设置界面用 pythonw 起的（没有控制台）。
+                # 不给这个标志，taskkill / powershell 会各自弹一个黑框 ——
+                # 「关闭机器人」闪两个窗口，看起来像出了故障。
+                creationflags=no_window(),
             ).stdout.strip()
             for part in out.split(","):
                 part = part.strip()

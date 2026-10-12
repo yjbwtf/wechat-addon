@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 from .config import DshConfig
+from .procutil import no_window
 
 # 兜底长度上限。人设里已经要求 80 字，这里只是防止模型跑飞。
 MAX_REPLY_CHARS = 600
@@ -237,6 +238,10 @@ class Brain:
                 cwd=str(self.cwd) if self.cwd else None,
                 env=env,
                 timeout=self.cfg.timeout_seconds,
+                # 只有回退到 dsh.cmd（= cmd.exe）时才会有窗口问题：
+                # 机器人没有控制台，起 cmd.exe 就会新建一个空黑框。
+                # 直接调 Electron 宿主时不弹窗，这个标志也无害。
+                creationflags=no_window(),
             )
         except subprocess.TimeoutExpired:
             raise BrainError(f"思考超时（>{self.cfg.timeout_seconds}s）")

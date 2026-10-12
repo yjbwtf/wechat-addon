@@ -33,11 +33,10 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
 import time
 from pathlib import Path
-from src.procutil import pid_alive
+from src.procutil import launch_bot, pid_alive
 
 ROOT = Path(__file__).resolve().parent
 LOG = ROOT / "data" / "logs" / "restart.log"
@@ -111,43 +110,19 @@ def main() -> int:
 
     # 3) 拉起新实例。**必须脱离**本进程，否则新实例会跟着一起被回收。
     #
-    # **不走 start.cmd。** 它是靠 cmd 的内建命令 `start "" python -m src.main`
-    # 起进程的，而 `start` 需要控制台来创建新窗口；我们用 DETACHED_PROCESS
-    # 启动（没有控制台），那一步会**静默失败** —— 实测 restart.log 里每步都
-    # 写「成功」，机器人却再也没起来。
+    # **不走 start.cmd。** 它是靠 cmd 的内建命令 `start` 起进程的，而 `start`
+    # 需要控制台来创建新窗口；我们这里刻意不要控制台，那一步会**静默失败**
+    # —— 实测 restart.log 里每步都写「成功」，机器人却再也没起来。
+    # 重启场景也不需要 start.cmd 的首次运行逻辑（建 venv、装依赖）。
     #
-    # 重启场景不需要 start.cmd 的首次运行逻辑（建 venv、装依赖），
-    # 直接拉起已有的解释器最可靠。
-    exe = ROOT / "venv" / "Scripts" / "pythonw.exe"
-    if not exe.exists():
-        exe = ROOT / "venv" / "Scripts" / "python.exe"
-    if not exe.exists():
-        log(f"找不到虚拟环境解释器（{exe}），无法重启。跑一次 start.cmd 修复。")
+    # 具体怎么起交给 src/procutil.launch_bot()：设置界面的「启动机器人」
+    # 走的是同一个函数，两边不会各写一套再慢慢跑偏。
+    pid, err = launch_bot(ROOT)
+    if not pid:
+        log(f"拉起机器人失败：{err}")
         return 1
 
-    # 子进程的输出没地方去，转存到文件 —— 否则出问题时什么都看不到。
-    try:
-        out = (LOG.parent / "restart-stdout.log").open("a", encoding="utf-8")
-    except OSError:
-        out = None
-
-    try:
-        subprocess.Popen(
-            [str(exe), "-m", "src.main"],
-            cwd=str(ROOT),
-            close_fds=True,
-            stdout=out or subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
-            creationflags=(
-                getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            ),
-        )
-    except OSError as exc:
-        log(f"拉起机器人失败：{exc}")
-        return 1
-
-    log(f"已拉起 {exe.name} -m src.main，重启流程结束")
+    log(f"已拉起新实例（pid {pid}），重启流程结束")
     return 0
 
 

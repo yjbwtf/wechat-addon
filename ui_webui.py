@@ -31,7 +31,8 @@ LOG_DIR = ROOT / "data" / "logs"
 sys.path.insert(0, str(ROOT))
 
 import ui_bridge as B  # noqa: E402
-from src.procutil import pid_alive
+from src.procutil import (bot_interpreter, launch_bot, no_window,  # noqa: E402
+                          pid_alive)
 
 SCHEMA_PATH = ROOT / "ui" / "schema.json"
 IN_PATH = ROOT / "data" / "_ui_in.txt"
@@ -179,30 +180,55 @@ def bot_start() -> dict:
     running, pid = bot_running()
     if running:
         return {"ok": False, "message": f"已经在跑了（pid {pid}）"}
-    bat = ROOT / "start.cmd"
-    if not bat.is_file():
-        return {"ok": False, "message": f"找不到 {bat}"}
-    # 用 start 起一个独立控制台窗口，日志能直接看
-    subprocess.Popen(["cmd.exe", "/c", "start", "", str(bat)], cwd=str(ROOT),
-                     creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+    if bot_interpreter(ROOT) is None:
+        return {"ok": False, "message": "虚拟环境还没建好，先跑一次 start.cmd -Setup"}
+
+    # start.cmd 在正常启动路径上会清 STOP；这里绕过它，就得自己清。
+    # 留着 STOP 的话机器人起来了也不会回话，看起来像"启动失败"。
+    (ROOT / "data" / "STOP").unlink(missing_ok=True)
+
+    # **别用 cmd.exe /c start。** 原来这里是 `["cmd.exe","/c","start","",bat]`
+    # 配 CREATE_NEW_CONSOLE，本意是"起个窗口好看日志"。但机器人已经改用
+    # pythonw 起了（无输出），那个窗口就永远是**空的**，还一直杵到机器人退出。
+    # 日志在设置界面的日志区里，不需要靠控制台。
+    pid, err = launch_bot(ROOT)
+    if not pid:
+        return {"ok": False, "message": err}
+
+    # 等 bot.pid 出现。它由机器人自己写，是"真的起来了"的唯一可靠证据 ——
+    # 进程存在不代表初始化成功（比如被单例守卫挡回去的那种）。
     for _ in range(24):
         time.sleep(0.5)
-        running, pid = bot_running()
+        running, got = bot_running()
         if running:
-            return {"ok": True, "message": f"已启动（pid {pid}）"}
-    return {"ok": False, "message": "启动超时，去看新开的控制台窗口或 logs/bot.log"}
+            return {"ok": True, "message": f"已启动（pid {got}）"}
+    return {"ok": False,
+            "message": "启动超时，去看日志区（logs/bot.log 和 bot-console.log）"}
 
 
 def bot_stop() -> dict:
-    for name in ("stop.cmd", "stop.py"):
-        p = ROOT / name
-        if p.is_file():
-            subprocess.run(["cmd.exe", "/c", str(p)], cwd=str(ROOT), timeout=60)
-            time.sleep(0.8)
-            running, pid = bot_running()
-            return {"ok": not running,
-                    "message": "已停止" if not running else f"还有进程在跑（pid {pid}）"}
-    return {"ok": False, "message": "找不到 stop.cmd / stop.py"}
+    # 同样别让 cmd.exe 弹窗。stop.py 直接用当前解释器跑；
+    # 万一只有 stop.cmd（旧版），才退回到 cmd.exe，并且不给它窗口。
+    stop_py = ROOT / "stop.py"
+    if stop_py.is_file():
+        argv = [sys.executable, str(stop_py)]
+        flags = no_window()
+    else:
+        stop_cmd = ROOT / "stop.cmd"
+        if not stop_cmd.is_file():
+            return {"ok": False, "message": "找不到 stop.py / stop.cmd"}
+        argv = ["cmd.exe", "/c", str(stop_cmd)]
+        flags = no_window()
+    try:
+        subprocess.run(argv, cwd=str(ROOT), timeout=60, creationflags=flags)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "message": "停止超时（60 秒）"}
+    except OSError as exc:
+        return {"ok": False, "message": f"调用停止脚本失败：{exc}"}
+    time.sleep(0.8)
+    running, pid = bot_running()
+    return {"ok": not running,
+            "message": "已停止" if not running else f"还有进程在跑（pid {pid}）"}
 
 
 def log_tail(lines: int = 200) -> str:

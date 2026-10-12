@@ -15,6 +15,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from .procutil import no_window
+
 PROGRAM_DATA = os.environ.get("ProgramData", r"C:\ProgramData")
 BASE = Path(PROGRAM_DATA) / "WeChatElevated"
 DATA_DIR = BASE / "data"
@@ -52,8 +54,12 @@ def run(action: str, args: dict | None = None,
     except OSError as exc:
         return False, f"写请求失败：{exc}"
 
+    # `schtasks` 是控制台程序，而机器人是用 pythonw 起的（没有控制台）。
+    # 不给 CREATE_NO_WINDOW 的话，Windows 会给它新建一个控制台 ——
+    # 于是群里说一句「\开 原神」，屏幕上就闪一个空黑框。
     proc = subprocess.run(["schtasks", "/run", "/tn", TASK_NAME],
-                          capture_output=True, text=True, errors="replace")
+                          capture_output=True, text=True, errors="replace",
+                          creationflags=no_window())
     if proc.returncode != 0:
         REQUEST.unlink(missing_ok=True)
         detail = (proc.stdout + proc.stderr).strip().splitlines()

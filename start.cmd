@@ -96,7 +96,16 @@ if /i "%~1"=="-UIWeb"   goto uiweb
 
 rem --- real start: now it is safe to clear the emergency-stop flag ---
 if exist "%ROOT%data\STOP" del /q "%ROOT%data\STOP"
-"%PYW%" -m src.main
+rem  The bot runs under pythonw (GUI subsystem), so it prints NOTHING to this
+rem  console. Running it here directly would leave an EMPTY black window on
+rem  screen for as long as the bot lives -- that is the "empty cmd window"
+rem  complaint. `start` is not enough either: the child would inherit this
+rem  console and keep the window alive.
+rem  launch.py spawns the bot DETACHED (no console attached), so this window
+rem  closes as soon as the script returns. On failure it returns non-zero and
+rem  we pause, so the error stays readable.
+"%PY%" "%ROOT%launch.py"
+if errorlevel 1 pause
 exit /b %errorlevel%
 
 :setup

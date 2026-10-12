@@ -32,8 +32,12 @@ def main() -> int:
     except Exception:  # noqa: BLE001
         pass
 
+    # tools/ 也要查：那里同样是有函数体的真代码（elevated_request.py、
+    # sanitize_for_publish.py），而 NameError 那类问题不分目录。
+    # 之前漏了这里，结果一个「未使用的导入」在 tools/ 里躺了很久没人发现。
     targets = sorted(
         [p for p in (ROOT / "src").glob("*.py")]
+        + [p for p in (ROOT / "tools").glob("*.py")]
         + [p for p in ROOT.glob("*.py")]
     )
     if not targets:

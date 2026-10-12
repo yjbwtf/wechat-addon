@@ -24,7 +24,7 @@
 cd /d C:\wechat_addon
 
 # 0) 打开设置界面（推荐先从这里把配置改完）
-ui\wechat_ui.exe
+.\start.cmd -UI
 
 # 1) 创建环境并安装依赖（首次；虚拟环境会自动建在工作目录之外，见文末说明）
 .\start.cmd -Setup
@@ -45,6 +45,8 @@ ui\wechat_ui.exe
 
 # 6) 正式运行（先保持 config.yaml 里 mode: draft）
 .\start.cmd
+#   注意：它会**立刻返回**，机器人转入后台运行（pythonw，无窗口）。
+#   日志在 data\logs\，或者用 start.cmd -UI 在界面里看。
 ```
 
 > 也可用 `.\start.ps1`，但本机 PowerShell 执行策略禁止运行脚本，
@@ -455,9 +457,57 @@ ui\wechat_ui.exe
 **已经在运行时，「启动机器人」会自动变灰**（2 秒刷新一次），防止点出一堆重复进程。
 「停止机器人」始终可点——它同时是急停按钮，不该被状态锁住。
 
-点「启动机器人」会在一个新的控制台窗口里跑 `start.cmd`（就是平时手动跑的那个），
-所以控制台里的日志能直接看到。它会等最多 12 秒确认进程真的起来了；
-如果没起来会弹窗提示去看那个控制台或日志，而不是静默失败。
+点「启动机器人」直接拉起 `venv\Scripts\pythonw.exe -m src.main`（无窗口、脱离界面进程），
+然后等最多 12 秒确认 `data/bot.pid` 真的出现了。没出现就提示去看日志区的
+`bot.log` / `bot-console.log`，而不是静默失败。
+
+> 早期版本这里写的是「在新的控制台窗口里跑 start.cmd，方便看日志」。
+> 那是**错的**：机器人改用 pythonw 起之后，它一个字都不会往控制台写，
+> 于是那个窗口永远是个空白黑框，还一直杵到机器人退出为止。
+
+### 那个空的黑框是怎么来的（以及为什么它很难查）
+
+机器人自己是用 `pythonw.exe` 起的（GUI 子系统，**没有控制台**）。
+而 Windows 的规则是：**一个没有控制台的进程去起一个控制台程序时，
+系统会给那个子进程新建一个控制台窗口**。所以只要代码里还有 `subprocess`
+去调 `cmd.exe` / `schtasks` / `powershell` / `taskkill`，屏幕上就会冒黑框。
+
+修法是传 `CREATE_NO_WINDOW`（见 `src/procutil.py` 的 `no_window()`），
+已经覆盖的位置：设置界面启动/停止机器人、`stop.py`、`elevate.py` 的 `schtasks`、
+`brain.py` 回退到 `dsh.cmd` 的那条路。
+
+**这里有个很容易踩反的细节**，实测记录（`tools/test_nowindow.py` 可以复现）：
+
+| 标志 | 直接子进程 | 子进程再起孙进程 |
+|---|---|---|
+| 不加 | 弹窗 | 弹窗 |
+| `CREATE_NEW_CONSOLE` | 弹窗 | 弹窗 |
+| `DETACHED_PROCESS` | **不弹** | **弹**（孙进程新建了控制台） |
+| `CREATE_NO_WINDOW` | **不弹** | **不弹** |
+| `DETACHED_PROCESS \| CREATE_NO_WINDOW` | 不弹 | 弹（前者优先级更高） |
+
+注意最后一行：`CREATE_NO_WINDOW` 和 `DETACHED_PROCESS` **同时给会被忽略**
+（微软文档里写着），所以「两个都加上更保险」是错的 —— 那样等于只有
+`DETACHED_PROCESS`。要挡住孙进程，只能用 `CREATE_NO_WINDOW`。
+
+顺带一提，我第一版排查时正是被 `DETACHED_PROCESS` 那一格误导过：
+测试里用 `cmd.exe /c ping` 看到「DETACHED 也弹窗」，差一点得出
+「DETACHED 没用」的结论 —— 真相是 `cmd.exe` 确实没有控制台了，
+**但它起 `ping` 时 `ping` 又新建了一个**。把 `ping` 直接起（不经 `cmd.exe` 包装）
+才看出来。所以 `tools/test_nowindow.py` 同时测这两种情况。
+
+### 排查这类问题时，枚举窗口别只认 `ConsoleWindowClass`
+
+`tools/test_nowindow.py` 第一版就是这么写的，结果一个窗口都抓不到 ——
+Win11 把 **Windows Terminal 设成默认终端**之后，控制台窗口的类名是
+`CASCADIA_HOSTING_WINDOW_CLASS`、宿主进程是 `WindowsTerminal.exe`。
+按类名认必然漏。正确做法是认**窗口所属进程是不是控制台宿主**
+（`WindowsTerminal.exe` / `OpenConsole.exe` / `conhost.exe`）。
+
+这个测试还刻意保留了「**不加标志时必须能看到窗口**」这条反向断言 ——
+否则枚举一旦失效，「加了标志没弹窗」就成了永远成立的空话。
+这一条在这次排查里真的救了场：它主动报出「不加标志时也没看到窗口，
+所以这个通过没有意义」。
 
 ### 只能有一个实例（以及一个藏得很深的坑）
 
