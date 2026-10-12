@@ -39,6 +39,9 @@ from pathlib import Path
 def no_window() -> int:
     """传给 `subprocess` 的 creationflags：别给控制台程序弹窗口。
 
+    **只能用这一个标志**，别再或上 DETACHED_PROCESS —— 那样它会被忽略。
+    原理和实测数据见 `tools/test_nowindow.py`。
+
     非 Windows 上返回 0（`subprocess.CREATE_NO_WINDOW` 只有 Windows 有，
     直接取属性会 AttributeError）。
     """
@@ -48,7 +51,16 @@ def no_window() -> int:
 
 
 def detached_flags() -> int:
-    """脱离父进程 + 不给窗口。用于起那种"父进程死了它还要活"的进程。"""
+    """脱离父进程。用于起那种"父进程死了它还要活"的进程（机器人本尊）。
+
+    **不要在这里再或上 `CREATE_NO_WINDOW`。** 实测：两者同时给时
+    `CREATE_NO_WINDOW` 会被**忽略**（微软文档写明它和 DETACHED_PROCESS /
+    CREATE_NEW_CONSOLE 互斥），于是"两个都加更保险"其实是只有 DETACHED。
+    要挡窗口的场合请单独用 `no_window()`。
+
+    机器人是 pythonw.exe（GUI 子系统），本来就不可能建控制台，所以这里
+    用 DETACHED 是为了"父进程死了它还活着"，不是为了窗口。
+    """
     if os.name != "nt":
         return 0
     return (getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
