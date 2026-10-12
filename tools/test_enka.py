@@ -182,6 +182,90 @@ check("部位按花羽沙杯冠排（不是接口给的顺序）",
       detail.index("生之花") < detail.index("死之羽") < detail.index("时之沙")
       < detail.index("空之杯") < detail.index("理之冠"), detail)
 
+# ---- 崩铁：响应结构和原神完全不一样 -------------------------------
+print()
+print("崩铁（detailInfo 那套结构）")
+print()
+HSR = {
+    "detailInfo": {
+        "nickname": "星", "level": 70, "worldLevel": 6,
+        "recordInfo": {"achievementCount": 900, "avatarCount": 50},
+        "avatarDetailList": [{
+            "avatarId": 1001, "level": 80, "rankList": [1, 2],
+            "equipment": {"rank": 1, "level": 80,
+                          "_flat": {"name": "2812952012494006470"}},
+            "relicList": [
+                {"type": 1, "level": 15, "_flat": {
+                    "setName": "8516006325888673169", "setID": 125,
+                    "props": [{"type": "HPDelta", "value": 705.6},
+                              {"type": "CriticalChance", "value": 0.032}]}},
+                {"type": 6, "level": 12, "_flat": {
+                    "setName": "8516006325888673169", "setID": 125,
+                    "props": [{"type": "SPRatioBase", "value": 0.1944}]}},
+            ],
+        }],
+    }, "ttl": 60, "uid": "1", "region": "CN",
+}
+out_h = enka.format_reply("hsr", "108931973", HSR)
+print(out_h)
+print()
+detail_h = enka.format_reply("hsr", "108931973", HSR, focus="三月七")
+print(detail_h)
+print()
+check("用 detailInfo 取到昵称/等级/世界等级/成就",
+      all(x in out_h for x in ("星", "等级 70", "世界等级 6", "成就 900")), out_h)
+check("崩铁**不能**用原神那套（playerInfo 是空的，但数据要出来）",
+      "没看到角色展柜" not in out_h, out_h)
+check("光锥名字查到了", "多流汗，少流泪 80 精1" in out_h, out_h)
+check("遗器套装名查到了", "烈阳惊雷的女武神" in out_h, out_h)
+check("详情用「光锥」「遗器」而不是「武器」「圣遗物」",
+      "光锥：" in detail_h and "遗器：" in detail_h
+      and "武器：" not in detail_h and "圣遗物：" not in detail_h, detail_h)
+check("**崩铁遗器等级不减 1**（15 就是 +15，原神才要减）",
+      "头 +15" in detail_h and "连结绳 +12" in detail_h, detail_h)
+check("崩铁比例词条乘 100（0.032 -> 3.2%）",
+      "暴击率3.2%" in detail_h, detail_h)
+check("崩铁绝对值词条不乘（HPDelta 705.6 原样）",
+      "生命值705.6" in detail_h, detail_h)
+check("星魂用「星魂N」", "星魂2" in detail_h, detail_h)
+
+# ---- 绝区零：主词条要按文档公式放大 ---------------------------------
+print()
+print("绝区零（PascalCase + 驱动盘公式）")
+print()
+ZZZ = {
+    "PlayerInfo": {
+        "SocialDetail": {"ProfileDetail": {"Nickname": "绳匠", "Level": 50}},
+        "ShowcaseDetail": {"AvatarList": [{
+            "Id": 1011, "Level": 60, "TalentLevel": 2,
+            "Weapon": {"Id": 14109, "Level": 60},
+            "EquippedList": [{"Slot": 1, "Equipment": {
+                "Id": 32741, "Level": 15,
+                "MainPropertyList": [{"PropertyId": 11103,
+                                      "PropertyValue": 550,
+                                      "PropertyLevel": 1}],
+                "RandomPropertyList": [{"PropertyId": 20103,
+                                        "PropertyValue": 240,
+                                        "PropertyLevel": 2}]}}],
+        }]},
+    }, "ttl": 60, "uid": "1", "region": "CN",
+}
+out_z = enka.format_reply("zzz", "14327029", ZZZ)
+detail_z = enka.format_reply("zzz", "14327029", ZZZ, focus="安比")
+print(detail_z)
+print()
+check("绝区零取到昵称/绳网等级", "绳匠" in out_z and "绳网等级 50" in out_z, out_z)
+check("音擎名字查到了且有星级", "音擎：霰落星殿 Lv.60 4★" in detail_z, detail_z)
+check("驱动盘套装名查到了", "折枝剑歌" in detail_z, detail_z)
+check("**主词条按文档公式放大**（550 * (1+15*0.2) = 2200，不是 550）",
+      "生命值2200" in detail_z, detail_z)
+check("**副词条乘次数**（240 * 2 / 100 = 4.8%，不是 2.4%）",
+      "暴击率4.8%" in detail_z, detail_z)
+check("绝区零能点名（早先被 game != 'zzz' 挡住了）",
+      "安比 Lv.60" in detail_z, detail_z)
+check("驱动盘等级用 Lv.N（社区写法不统一，用不会歧义的）",
+      "Lv.15" in detail_z, detail_z)
+
 miss = enka.format_reply("gi", "123456789", GI, focus="钟离")
 check("点名的角色不在展柜里 -> 说清楚并列出有哪些",
       "没找到「钟离」" in miss and "神里绫华" in miss, miss)

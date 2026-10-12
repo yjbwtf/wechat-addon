@@ -110,7 +110,7 @@ def main() -> int:
         print()
 
     # ---- 原神的套装 / 词条 / 物品名 ------------------------------------
-    # 这三张表只有原神要（崩铁/绝区零的装备结构不同，还没做）
+    # 这三张表只有原神要（崩铁/绝区零的装备结构不同，各有各的表）
     print("gi 的套装/词条/物品名:")
     locs_gi = fetch("store/gi/locs.json")[LANG]
     sets: dict[str, str] = {}
@@ -125,6 +125,59 @@ def main() -> int:
     out["gi"]["text"] = texts
     print("  -> 套装 %d 个 / 词条 %d 个 / 物品名 %d 个" % (
         len(sets), len(props), len(texts)))
+    print()
+
+    # ---- 崩铁：一张大表全包 -------------------------------------------
+    # 光锥名、遗器套装名、词条名都是**同一个 zh-cn 表**里的 hash/字符串键，
+    # 所以直接整张存下来（479 条），不用拆。
+    print("hsr 的文本表:")
+    out["hsr"]["text"] = fetch("store/hsr/hsr.json")[LANG]
+    print("  -> %d 条（光锥名 + 遗器套装名 + 词条名共用）" % len(out["hsr"]["text"]))
+    print()
+
+    # ---- 绝区零：音擎 / 驱动盘套装 / 词条 ------------------------------
+    print("zzz 的装备表:")
+    locs_zzz = fetch("store/zzz/locs.json")[LANG]
+
+    def loc(key) -> str:
+        return locs_zzz.get(str(key)) or ""
+
+    weapon: dict[str, dict] = {}
+    for wid, info in fetch("store/zzz/weapons.json").items():
+        name = loc((info or {}).get("ItemName"))
+        if name:
+            weapon[wid] = {"n": name, "r": (info or {}).get("Rarity")}
+
+    # 驱动盘：单个盘 Id -> (中文套装名, 稀有度)。
+    # **稀有度必须一起存** —— 主词条的数值要按
+    # `值 * (1 + 等级 * 稀有度系数)` 算（见 src/enka.py 里的说明）
+    eq = fetch("store/zzz/equipments.json")
+    suits = {}
+    for sid, info in (eq.get("Suits") or {}).items():
+        name = loc((info or {}).get("Name"))
+        if name:
+            suits[sid] = name
+    disc = {}
+    for did, info in (eq.get("Items") or {}).items():
+        name = suits.get(str((info or {}).get("SuitId")))
+        if name:
+            disc[did] = {"s": name, "r": (info or {}).get("Rarity")}
+
+    # 词条：Name 是本地化 key，Format 里带 % 就是百分比
+    # （比硬编码哪些词条是百分比靠谱 —— 这是数据自己说的）
+    prop = {}
+    for pid, info in fetch("store/zzz/property.json").items():
+        name = loc((info or {}).get("Name"))
+        if name:
+            prop[pid] = {"n": name,
+                         "p": 1 if "%" in str((info or {}).get("Format") or "") else 0}
+
+    out["zzz"]["weapon"] = weapon
+    out["zzz"]["disc"] = disc
+    out["zzz"]["suit"] = suits
+    out["zzz"]["prop"] = prop
+    print("  -> 音擎 %d / 驱动盘 %d / 套装 %d / 词条 %d" % (
+        len(weapon), len(disc), len(suits), len(prop)))
     print()
 
     OUT.parent.mkdir(parents=True, exist_ok=True)

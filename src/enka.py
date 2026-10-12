@@ -190,6 +190,7 @@ def _parse_build(avatar: dict) -> tuple[dict | None, list[dict]]:
                 "slot": _SLOTS.get(flat.get("equipType"), flat.get("equipType")),
                 "set": gi_set_name(flat.get("setId")),
                 "level": rel.get("level"),
+                "lv": _equip_level("gi", rel.get("level")),
                 "rank": flat.get("rankLevel"),
                 "main": _short(main.get("mainPropId")),
                 "main_val": _stat_value(main.get("mainPropId"),
@@ -202,6 +203,160 @@ def _parse_build(avatar: dict) -> tuple[dict | None, list[dict]]:
     order = {v: i for i, v in enumerate(_SLOTS.values())}
     arts.sort(key=lambda a: order.get(a["slot"], 99))
     return weapon, arts
+
+
+def hsr_text(key) -> str:
+    """崩铁的文本表：光锥名、遗器套装名、词条名**共用同一张**。
+
+    光锥和遗器套装的名字都是 hash **字符串**（8516006325888673169 这种），
+    词条名是 "CriticalChance" 这种语义字符串 —— 都在 store/hsr/hsr.json 的
+    zh-cn 里，所以整张存下来就够，不用拆成三张。
+    """
+    return ((_load().get("hsr") or {}).get("text") or {}).get(str(key)) or ""
+
+
+def _hsr_stat_value(prop: str, value) -> str:
+    """崩铁的词条值：`*Delta` 是**绝对值**，其余是比例（0.1512 = 15.12%）。
+
+    实测过：HPDelta/AttackDelta/DefenceDelta/SpeedDelta 是绝对值，
+    HPAddedRatio/CriticalChance/SpeedDelta 之外的全是比例。规则就按后缀来，
+    比列一堆词条名可靠。
+    """
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if str(prop).endswith("Delta"):
+        return "%g" % num
+    return "%.1f%%" % (num * 100)
+
+
+#: 崩铁遗器部位。接口给的是 type 1..6
+_HSR_SLOTS = {1: "头", 2: "手", 3: "身", 4: "脚", 5: "位面球", 6: "连结绳"}
+
+#: 绝区零驱动盘部位
+_ZZZ_SLOTS = {1: "1号位", 2: "2号位", 3: "3号位",
+              4: "4号位", 5: "5号位", 6: "6号位"}
+
+
+def _zzz_table(kind: str) -> dict:
+    return (_load().get("zzz") or {}).get(kind) or {}
+
+
+def _zzz_stat(prop_id) -> tuple[str, bool]:
+    """绝区零词条 -> (中文名, 是不是百分比)。
+
+    **是不是百分比由数据自己说了算**：store 里每条词条带一个 `Format`，
+    含 `%` 的就是百分比。比硬编码一张「哪些词条是百分比」的表靠谱得多。
+    """
+    p = _zzz_table("prop").get(str(prop_id)) or {}
+    return p.get("n") or str(prop_id), bool(p.get("p"))
+
+
+def _zzz_stat_name_value(prop_id, value) -> str:
+    """绝区零**副词条**的数值。
+
+    **10000 = 100%**（实测：啄木鸟电音 2 件套的暴击率加成存的是 800，
+    正好是 8%），所以百分比要除以 100。
+
+    副词条的公式文档没给，是从数据判出来的：同一个 `PropertyValue` 会配上
+    `PropertyLevel` 1/2/3/4（例如 20103 永远是 240），说明它是**每次的量**，
+    总量要乘 level（240×4 = 960 -> 9.6%，正是暴击率副词条的满值）。
+    """
+    name, pct = _zzz_stat(prop_id)
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if pct:
+        return "%.1f%%" % (num / 100.0)
+    return "%g" % num
+
+
+def _zzz_sub_value(prop_id, value, count) -> str:
+    """绝区零**副词条**的数值 = 每次的量 × 次数。
+
+    实测判据：同一个 `PropertyValue` 会配上 `PropertyLevel` 1/2/3/4
+    （例如 20103 永远是 240），所以它是每次的量，不是总量。
+    240 × 4 = 960 -> 9.6%，正是暴击率副词条的满值。
+    """
+    base = _zzz_stat_name_value(prop_id, value)
+    try:
+        n = float(count or 1)
+    except (TypeError, ValueError):
+        n = 1.0
+    if n <= 1:
+        return base
+    try:
+        total = float(value) * n
+    except (TypeError, ValueError):
+        return base
+    return _zzz_stat_name_value(prop_id, total)
+
+
+#: 驱动盘主词条的稀有度系数。文档只给了 4/3/2（绝区零的 4 = S 级）
+_ZZZ_MAIN_SCALE = {4: 0.2, 3: 0.25, 2: 0.3}
+
+
+def _zzz_main_value(prop_id, value, level, rarity) -> str:
+    """绝区零**主词条**的数值。
+
+    文档给的公式：`结果 = 基础值 * (1 + 等级 * 稀有度系数)`。
+    验算过：550 * (1 + 15*0.2) = 2200（S 级 1 号位生命值满值）、
+    600 * 4 = 2400 -> 24%（暴击率满值）、750 * 4 = 3000 -> 30%（属性伤害满值）。
+
+    **不做这一步所有主词条都会小 4 倍**（第一版就是这样，
+    生命值 550 而实际是 2200）。
+    """
+    try:
+        num = float(value)
+        lv = float(level or 0)
+    except (TypeError, ValueError):
+        return _zzz_stat_name_value(prop_id, value)
+    scale = _ZZZ_MAIN_SCALE.get(rarity)
+    if scale is None:
+        # 表里没有这个稀有度就按 S 级算，并留一条日志 ——
+        # 静默按错的比例算比报错还难查
+        scale = 0.2
+        logging.warning("绝区零驱动盘稀有度 %r 不在系数表里，按 S 级算", rarity)
+    name, pct = _zzz_stat(prop_id)
+    total = num * (1 + lv * scale)
+    if pct:
+        return "%.1f%%" % (total / 100.0)
+    return "%g" % round(total)
+
+
+def _region(data: dict) -> str:
+    raw = str(data.get("region") or "")
+    return _REGION.get(raw.lower(), raw)
+
+
+#: 每个游戏对「装备」的叫法不同，文案得跟着变，不能写死「圣遗物」
+_TERM = {
+    "gi": {"weapon": "武器", "equip": "圣遗物"},
+    "hsr": {"weapon": "光锥", "equip": "遗器"},
+    "zzz": {"weapon": "音擎", "equip": "驱动盘"},
+}
+
+
+def _equip_level(game: str, level) -> str:
+    """装备等级的写法。**三个游戏的基准不一样，实测过**：
+
+    | 游戏 | 接口给的值 | 显示 | 为什么 |
+    |---|---|---|---|
+    | 原神 | 21 | `+20` | 1-based，21 才是满级的 +20 |
+    | 崩铁 | 15 | `+15` | 就是 +值本身（满级 15），**不能减 1** |
+    | 绝区零 | 15 | `Lv.15` | 同样是直接值；社区写法不统一，用不会歧义的 |
+
+    第一版把原神那套（减 1）套到了崩铁上，所有人的遗器都少显示一级。
+    """
+    if level is None:
+        return ""
+    if game == "gi":
+        return "+%d" % max(0, int(level) - 1)
+    if game == "hsr":
+        return "+%d" % int(level)
+    return "Lv.%d" % int(level)
 
 
 def _build_line(name: str, level: str, cons: str, build) -> str:
@@ -450,14 +605,15 @@ _REGION = {"cn": "国服", "os_usa": "美服", "os_euro": "欧服",
            "na": "美服", "eu": "欧服", "asia": "亚服", "tw": "台港澳服"}
 
 
-def _detail_reply(label: str, nick: str, uid: str, who: dict) -> str:
-    """单个角色的完整面板：武器 + 五件圣遗物（主词条 + 四个副词条）。"""
+def _detail_reply(game: str, label: str, nick: str, uid: str, who: dict) -> str:
+    """单个角色的完整面板：武器/光锥/音擎 + 五~六件装备（主词条 + 副词条）。"""
+    term = _TERM.get(game, _TERM["gi"])
     lines = ["%s · %s（UID %s）" % (label, nick, uid),
              "%s Lv.%s%s" % (who["name"], who["level"],
                              ("  " + who["cons"]) if who["cons"] else "")]
     weapon, arts = who.get("build") or (None, [])
     if weapon:
-        w = "武器：%s" % weapon["name"]
+        w = "%s：%s" % (term["weapon"], weapon["name"])
         if weapon.get("level"):
             w += " Lv.%s" % weapon["level"]
         if weapon.get("rank"):
@@ -466,16 +622,148 @@ def _detail_reply(label: str, nick: str, uid: str, who: dict) -> str:
             w += " 精%d" % weapon["refine"]
         lines.append(w)
     if not arts:
-        lines.append("圣遗物：没看到（展柜里没放，或者详细数据没开放）")
+        lines.append("%s：没看到（展柜里没放，或者详细数据没开放）" % term["equip"])
         return "\n".join(lines)
-    lines.append("圣遗物：%s" % _set_summary(arts))
+    lines.append("%s：%s" % (term["equip"], _set_summary(arts)))
     for a in arts:
         subs = "  ".join("%s%s" % (n, v) for n, v in a["subs"])
-        lines.append("  %s +%s %s · %s%s%s"
-                     % (a["slot"], (a.get("level") or 1) - 1, a["set"],
+        lines.append("  %s %s %s · %s%s%s"
+                     % (a["slot"], a.get("lv") or "", a["set"],
                         a["main"], a["main_val"],
                         ("  |  " + subs) if subs else ""))
     return "\n".join(lines)
+
+
+def _gi_payload(data: dict) -> dict:
+    """原神。"""
+    pi = data.get("playerInfo") or {}
+    line2 = []
+    if pi.get("level"):
+        line2.append("等级 %s" % pi["level"])
+    if pi.get("worldLevel"):
+        line2.append("世界等级 %s" % pi["worldLevel"])
+    if pi.get("finishAchievementNum"):
+        line2.append("成就 %s" % pi["finishAchievementNum"])
+    f, c = pi.get("towerFloorIndex"), pi.get("towerLevelIndex")
+    if f and c:
+        line2.append("深境 %s-%s" % (f, c))
+    avatars, summary_only = _gi_avatars(data)
+    return {"nick": pi.get("nickname") or "?", "line2": line2,
+            "region": _region(data), "avatars": avatars,
+            "summary_only": summary_only}
+
+
+def _hsr_payload(data: dict) -> dict:
+    """崩铁。
+
+    **注意：崩铁的响应结构和原神完全不一样。** 它没有 `playerInfo`，
+    角色在 `detailInfo.avatarDetailList` 里，昵称/等级也在 `detailInfo`
+    下面 —— 用原神那套去取会一个字段都拿不到。实测踩过：第一版就是这样，
+    查崩铁只会回一句「没看到角色展柜」。
+    """
+    di = data.get("detailInfo") or {}
+    line2 = []
+    if di.get("level"):
+        line2.append("等级 %s" % di["level"])
+    if di.get("worldLevel"):
+        line2.append("世界等级 %s" % di["worldLevel"])
+    rec = di.get("recordInfo") or {}
+    if rec.get("achievementCount"):
+        line2.append("成就 %s" % rec["achievementCount"])
+    if rec.get("avatarCount"):
+        line2.append("角色 %s 个" % rec["avatarCount"])
+
+    out: list[dict] = []
+    for a in di.get("avatarDetailList") or []:
+        # 光锥。`_flat.name` 是个 hash 字符串，要去 hsr 的文本表查
+        eq = a.get("equipment") or {}
+        weapon = None
+        if eq:
+            weapon = {"name": hsr_text((eq.get("_flat") or {}).get("name")) or "光锥",
+                      "level": eq.get("level"), "refine": eq.get("rank"),
+                      "rank": None}
+        # 遗器。`_flat.props` 是算好的值，**第一条是主词条** ——
+        # 这一点验过，不是猜的：1 号位首项全是 HPDelta、2 号位全是
+        # AttackDelta（部位决定主词条），3~6 号位首项也都落在各自
+        # 合法的主词条集合里；props 条数正好 = 1 主 + 副词条数。
+        arts = []
+        for r in a.get("relicList") or []:
+            rf = r.get("_flat") or {}
+            props = rf.get("props") or []
+            main = props[0] if props else {}
+            arts.append({
+                "slot": _HSR_SLOTS.get(r.get("type"), "%s号位" % r.get("type")),
+                "set": hsr_text(rf.get("setName")) or "遗器%s" % rf.get("setID"),
+                "level": r.get("level"), "rank": None,
+                "lv": _equip_level("hsr", r.get("level")),
+                "main": hsr_text(main.get("type")) or str(main.get("type") or "?"),
+                "main_val": _hsr_stat_value(main.get("type"), main.get("value")),
+                "subs": [(hsr_text(s.get("type")) or str(s.get("type")),
+                          _hsr_stat_value(s.get("type"), s.get("value")))
+                         for s in props[1:]],
+            })
+        order = {v: i for i, v in enumerate(_HSR_SLOTS.values())}
+        arts.sort(key=lambda x: order.get(x["slot"], 99))
+        rl = a.get("rankList") or []
+        out.append({"name": avatar_name("hsr", a.get("avatarId")),
+                    "level": str(a.get("level") or "?"),
+                    "cons": ("星魂%d" % len(rl)) if rl else "",
+                    "build": (weapon, arts)})
+
+    return {"nick": di.get("nickname") or "?", "line2": line2,
+            "region": _region(data), "avatars": out, "summary_only": False}
+
+
+def _zzz_payload(data: dict) -> dict:
+    """绝区零。字段是 PascalCase，装备在 `EquippedList` / `Weapon` 里。"""
+    pi = data.get("PlayerInfo") or {}
+    pd = (pi.get("SocialDetail") or {}).get("ProfileDetail") or {}
+    line2 = []
+    if pd.get("Level"):
+        line2.append("绳网等级 %s" % pd["Level"])
+
+    out: list[dict] = []
+    for a in (pi.get("ShowcaseDetail") or {}).get("AvatarList") or []:
+        w = a.get("Weapon") or {}
+        weapon = None
+        if w:
+            wi = _zzz_table("weapon").get(str(w.get("Id"))) or {}
+            weapon = {"name": wi.get("n") or "音擎", "level": w.get("Level"),
+                      "rank": wi.get("r"), "refine": None}
+        arts = []
+        for item in a.get("EquippedList") or []:
+            e = item.get("Equipment") or {}
+            # 驱动盘主词条要乘等级/稀有度系数，所以得知道这个盘的稀有度
+            info = _zzz_table("disc").get(str(e.get("Id"))) or {}
+            mains = e.get("MainPropertyList") or []
+            main = mains[0] if mains else {}
+            arts.append({
+                "slot": _ZZZ_SLOTS.get(item.get("Slot"),
+                                       "%s号位" % item.get("Slot")),
+                "set": info.get("s") or "驱动盘%s" % e.get("Id"),
+                "level": e.get("Level"), "rank": info.get("r"),
+                "lv": _equip_level("zzz", e.get("Level")),
+                "main": _zzz_stat(main.get("PropertyId"))[0],
+                "main_val": _zzz_main_value(main.get("PropertyId"),
+                                            main.get("PropertyValue"),
+                                            e.get("Level"), info.get("r")),
+                # 副词条：PropertyValue 是**每次**的量，总量 = 值 * 次数
+                "subs": [(_zzz_stat(x.get("PropertyId"))[0],
+                          _zzz_sub_value(x.get("PropertyId"),
+                                         x.get("PropertyValue"),
+                                         x.get("PropertyLevel")))
+                         for x in (e.get("RandomPropertyList") or [])],
+            })
+        order = {v: i for i, v in enumerate(_ZZZ_SLOTS.values())}
+        arts.sort(key=lambda x: order.get(x["slot"], 99))
+        mind = a.get("TalentLevel") or 0
+        out.append({"name": avatar_name("zzz", a.get("Id")),
+                    "level": str(a.get("Level") or "?"),
+                    "cons": ("命%d" % mind) if mind else "",
+                    "build": (weapon, arts)})
+
+    return {"nick": pd.get("Nickname") or "?", "line2": line2,
+            "region": _region(data), "avatars": out, "summary_only": False}
 
 
 def parse_payload(game: str, data: dict) -> dict:
@@ -486,32 +774,10 @@ def parse_payload(game: str, data: dict) -> dict:
     （Enka 的作者明确要求别反复打同一个 UID）。
     """
     if game == "zzz":
-        pi = data.get("PlayerInfo") or {}
-        pd = (pi.get("SocialDetail") or {}).get("ProfileDetail") or {}
-        nick = pd.get("Nickname") or "?"
-        line2 = []
-        if pd.get("Level"):
-            line2.append("绳网等级 %s" % pd["Level"])
-        avatars, summary_only = _zzz_avatars(data)
-    else:
-        pi = data.get("playerInfo") or {}
-        nick = pi.get("nickname") or "?"
-        line2 = []
-        if pi.get("level"):
-            line2.append("等级 %s" % pi["level"])
-        if pi.get("worldLevel"):
-            line2.append("世界等级 %s" % pi["worldLevel"])
-        if pi.get("finishAchievementNum"):
-            line2.append("成就 %s" % pi["finishAchievementNum"])
-        f, c = pi.get("towerFloorIndex"), pi.get("towerLevelIndex")
-        if f and c:
-            line2.append("深境 %s-%s" % (f, c))
-        avatars, summary_only = (_gi_avatars(data) if game == "gi"
-                                 else _hsr_avatars(data))
-
-    region = _REGION.get(str(data.get("region") or "").lower(), data.get("region"))
-    return {"nick": nick, "line2": line2, "region": region or "",
-            "avatars": avatars, "summary_only": summary_only}
+        return _zzz_payload(data)
+    if game == "hsr":
+        return _hsr_payload(data)
+    return _gi_payload(data)
 
 
 def render(game: str, uid: str, parsed: dict, focus: str | None = None) -> str:
@@ -522,11 +788,11 @@ def render(game: str, uid: str, parsed: dict, focus: str | None = None) -> str:
     summary_only = bool(parsed.get("summary_only"))
     region = parsed.get("region") or ""
 
-    if focus and game != "zzz":
+    if focus:
         key = focus.strip().lower()
         hit = next((a for a in avatars if key and key in a["name"].lower()), None)
         if hit:
-            return _detail_reply(label, nick, uid, hit)
+            return _detail_reply(game, label, nick, uid, hit)
         have = "、".join(a["name"] for a in avatars[:12])
         cause = ("展柜只有概要，看不到角色详情" if summary_only
                  else "展柜里没有这个角色")
@@ -556,8 +822,11 @@ def render(game: str, uid: str, parsed: dict, focus: str | None = None) -> str:
         lines.append("（只有概要：拿不到命座、武器、圣遗物。"
                      "游戏里把角色展柜的详细数据打开就有了）")
     else:
-        lines.append("想看某个角色的完整面板（圣遗物词条）："
-                     "在指令后面加名字，例如「查询 原神 %s 可莉」" % uid)
+        term = _TERM.get(game, _TERM["gi"])["equip"]
+        lines.append("想看某个角色的完整面板（%s词条）：在指令后面加名字，"
+                     "例如「查询 %s %s %s」"
+                     % (term, label, uid,
+                        avatars[0]["name"] if avatars else "可莉"))
     return "\n".join(lines)
 
 
@@ -615,3 +884,8 @@ def query(game: str | None, uid: str, cfg, cache: Cache,
         return True, render(g, uid, parsed, focus=focus)
 
     return False, last_err or "三个游戏都查不到这个 UID。"
+
+
+def _zzz_stat_value(prop_id, value) -> str:
+    """旧名字，等于「按总量格式化」。保留给测试和一次性调用。"""
+    return _zzz_stat_name_value(prop_id, value)
