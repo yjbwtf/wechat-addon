@@ -32,7 +32,7 @@ from .brain import Brain, BrainError, build_prompt
 from .config import CONFIG_PATH, ROOT, Config, load_config, load_persona
 from .drafts import DraftStore
 from .history import HistoryStore, StoredMessage
-from . import elevate, logkeep, meme_feed
+from . import elevate, logkeep, meme_feed, model_preset
 from .memes import MemeBook
 from .mood import MoodStore, parse_mood_tag
 from .policy import Gatekeeper, StopSwitch, make_msg_key
@@ -993,6 +993,9 @@ class Bot:
         logging.info("机器人启动 | 模式=%s | 白名单群=%s | 每群每小时上限=%d",
                      self.cfg.mode, self.cfg.whitelist_groups or "（空，不会回复任何群）",
                      self.cfg.rate_limit.per_group_per_hour)
+        # 把闲聊模型档位写进日志：出问题时要一眼看到「现在到底在用哪个模型」，
+        # 而不是去翻 config.yaml + profile + 叠加层三处。
+        logging.info("闲聊模型：%s", model_preset.describe(self.cfg.dsh))
         if self.agg.enabled:
             logging.info(
                 "连续消息聚合：开 | 静默 %.0fs 后回复 | 最长等 %.0fs | 最多 %d 条 | 吸收范围=%s",
@@ -1173,6 +1176,7 @@ def cmd_check(cfg: Config) -> int:
           f" | 命中上限 {cfg.memes.max_entries} 个")
     print(f"  历史单条截断    : {cfg.history.per_message_chars} 字")
     print(f"  dsh profile     : {cfg.dsh.profile}")
+    print(f"  闲聊模型        : {model_preset.describe(cfg.dsh)}")
     print(f"  dsh 启动器      : {cfg.dsh.command}")
     if not Path(cfg.dsh.command).exists():
         print("  !! 找不到 dsh 启动器，请检查 config.yaml 的 dsh.command")

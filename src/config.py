@@ -26,6 +26,16 @@ class DshConfig:
     command: str
     profile: str = "wechat"
     timeout_seconds: int = 180
+    #: 闲聊用哪个模型。「切换」是**手动**的，不做任何自动判断。
+    #:   deepseek = profile 里配的（现在是 DSH 桌面账号的 deepseek-flash，按量计费）
+    #:   zhipu    = 智谱 GLM-4.7-Flash（官方定价输入/输出都是「免费」）
+    #: 实现方式见 src/model_preset.py：给 dsh 加一层 --patch 叠加层。
+    model_preset: str = "deepseek"
+    #: 叠加层放哪。空 = 用默认的 <项目>\dsh\ 目录。
+    preset_dir: str = ""
+    #: 智谱的 Key。**不进公开仓库**（config.yaml 是 gitignore 的）。
+    #: 留空时回退到环境变量 ZAI_API_KEY。
+    zhipu_api_key: str = ""
 
 
 @dataclass
@@ -589,6 +599,9 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
             command=str(dsh_raw["command"]),
             profile=str(dsh_raw.get("profile", "wechat")),
             timeout_seconds=int(dsh_raw.get("timeout_seconds", 180)),
+            model_preset=str(dsh_raw.get("model_preset", "deepseek")).strip().lower(),
+            preset_dir=str(dsh_raw.get("preset_dir", "") or ""),
+            zhipu_api_key=str(dsh_raw.get("zhipu_api_key", "") or ""),
         ),
         mode=mode,
         whitelist_groups=[str(g) for g in (raw.get("whitelist_groups") or [])],

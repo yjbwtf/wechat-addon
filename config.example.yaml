@@ -23,6 +23,18 @@ dsh:
   profile: wechat
   # 单次思考超时（秒）
   timeout_seconds: 180
+  # 闲聊用哪个模型（手动切换，机器人不替你做判断）：
+  #   deepseek = profile 里配的（DSH 桌面账号，按量计费）
+  #   zhipu    = 智谱 GLM-4.7-Flash（官方定价输入/输出都是「免费」）
+  # 改完立刻生效，不用重启机器人。\agent 指令不受影响。
+  model_preset: deepseek
+  # 智谱的 API Key，只在 model_preset: zhipu 时用得到。
+  # 申请：https://bigmodel.cn/usercenter/proj-mgmt/apikeys
+  # 不用实名认证。本文件（config.yaml）是 gitignore 的；dsh\model-zhipu.yml
+  # 里只写变量名不写密钥，所以密钥不会进仓库。
+  zhipu_api_key: ''
+  # 叠加层放哪，留空 = <项目>\dsh\model-zhipu.yml
+  preset_dir: ''
 
 # draft = 只生成草稿，不发送到群里（强烈建议先用这个跑一两周）
 # auto  = 生成后直接发送

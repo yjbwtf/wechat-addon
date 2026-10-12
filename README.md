@@ -1334,6 +1334,84 @@ powershell -ExecutionPolicy Bypass -File tools\setup_elevated.ps1
 
 ---
 
+## 二十四、闲聊用哪个模型：手动档位切换
+
+一句话：**界面里选一档，下一条消息就换模型，不用重启机器人。** 不做任何自动判断
+（不是「看情况挑模型」，就是你说了算）。
+
+### 两个档位
+
+| 档位 | 模型 | 花钱吗 | 说明 |
+|---|---|---|---|
+| `deepseek`（默认） | `deepseek-flash` | 按量计费 | 走 DSH 桌面账号，不用 API Key |
+| `zhipu` | `glm-4.7-flash` | **免费** | 智谱开放平台，要一个 API Key |
+
+设置界面 **高级 → 大脑 → 闲聊用哪个模型**。
+
+`\agent` 指令**不受这个开关影响** —— 它走自己的 `wechat-agent` profile。
+
+### 为什么换模型不用重启，也不用复制 profile
+
+`dsh` 支持 `--patch <文件>`：在 profile 之上再叠一层覆盖。所以：
+
+    档位 deepseek -> 不加 --patch，就是 profile 里原来那套
+    档位 zhipu    -> 加 --patch dsh\model-zhipu.yml
+
+回切就是「不加 `--patch`」，**天然回到原样**，不存在把原配置改坏的路径。
+
+至于「不用重启」：`brain.py` 每收到一条消息都会**新起一个 `dsh` 进程**，
+profile 是那时候重新组合的。所以改完档位，下一条消息就是新模型。
+
+### 智谱的 Key 放哪
+
+申请：<https://bigmodel.cn/usercenter/proj-mgmt/apikeys>
+（注册 `open.bigmodel.cn` → 登录 → 创建 API Key。**目前调用 API 不强制实名认证**。）
+
+拿到后填在设置界面的「智谱 API Key」，或者直接写 `config.yaml` 的
+`dsh.zhipu_api_key`。留空则回退到环境变量 `ZAI_API_KEY`。
+
+**密钥不会进公开仓库**：`config.yaml` 是 gitignore 的，而 `dsh\model-zhipu.yml`
+里写的 `apiKeyEnv: ZAI_API_KEY` 只是一个**变量名**，真正的 Key 由 `brain.py`
+按档位塞进子进程环境。
+
+### 三个坑（都是实测踩出来的，写下来免得再踩）
+
+**1. `--patch` 必须排在 `--json -` 前面。** dsh 的用法是
+`dsh [--profile] <name> [options] [app-args...]`，`--json -` 之后的都算 app 参数，
+`--patch` 放后面会报 `unknown option '--patch'`。
+参数拼装的单元测试看不出这个 —— 真的跑一次 `Brain.ask()` 才炸出来。
+
+**2. 叠加层里必须给模型声明 `reasoningEfforts`。** 不写的话，哪怕上游默认值是
+`low`，也会直接报 `provider "zhipu" model "..." does not support reasoning effort "low"`。
+
+**3. `apiKeyEnv` 的名字两边要对上。** 叠加层里写什么，`brain.py` 就得往环境里塞什么。
+对不上会报 `no credential for provider route ...`，而且报错文本不会告诉你
+「其实环境变量里是另一个名字」。
+
+### 免费模型会被下线
+
+`GLM-4.5-Flash` 在 **2026-01-30 已经下线**了，请求被自动转去 `GLM-4.7-Flash`。
+所以哪天报「模型不存在」，第一件事是去看
+[官方定价页](https://docs.bigmodel.cn/cn/guide/start/pricing) 上的免费模型列表，
+把 `dsh\model-zhipu.yml` 里的 `glm-4.7-flash` 换成新的编码。
+
+顺带一提，**联网搜索不跟着换**。web 工具的 `searchProvider` 仍然是
+`deepseek-official`，也就是搜索那部分还是走 DeepSeek —— 换模型不会改变这一点。
+
+### 怎么自己验（不花钱、不要 Key）
+
+`data\_fake_llm.py` 是个本机假模型服务，`data\model-zhipu.yml` 是同样结构、
+只把端点指向它的叠加层。跑：
+
+    venv\Scripts\python.exe data\_fake_llm.py          # 一个窗口
+    venv\Scripts\python.exe data\_e2e_preset.py        # 另一个窗口
+
+就能看到请求真的走了另一条路由，而且请求体里的 `tools` 有三个
+（`web_search` / `web_fetch` / `exit_plan_mode`）—— 这是「换了模型也还有搜索能力」
+的证据。（`data\` 是 gitignore 的，这两个文件只在本机。）
+
+---
+
 ## 免责声明与使用限制
 
 **请在使用或分发前读完这一节。**

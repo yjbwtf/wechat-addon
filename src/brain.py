@@ -23,6 +23,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import model_preset
 from .config import DshConfig
 from .procutil import no_window
 
@@ -223,10 +224,22 @@ class Brain:
         env.setdefault("PYTHONIOENCODING", "utf-8")
         env["PYTHONUTF8"] = "1"
         env.update(self.extra_env)
+        # 闲聊模型的档位（手动切换，见 src/model_preset.py）。
+        # 每起一个 dsh 都重新读一次配置 —— 所以界面里改完档位，
+        # **下一条消息就是新模型**，不用重启机器人。
+        env.update(model_preset.env_overrides(self.cfg))
         argv = self._launcher_prefix()
         if argv and argv[0].lower().endswith("harness.exe"):
             env["ELECTRON_RUN_AS_NODE"] = "1"
-        argv += ["--profile", self.cfg.profile, "--json", "-"]
+        argv += ["--profile", self.cfg.profile]
+        # **--patch 必须排在 `--json -` 前面。**
+        # dsh 的用法是 `dsh [--profile] <name> [options] [app-args...]`，
+        # `--json -` 之后的都算 app 参数；--patch 是启动器自己的选项，
+        # 放到后面会被当成 app 参数，报 `unknown option '--patch'`。
+        # （这个顺序错第一版就写错了，参数拼装的单元测试看不出来，
+        #   真的跑一次 Brain.ask() 才炸出来。）
+        argv += model_preset.launch_args(self.cfg)
+        argv += ["--json", "-"]
 
         started = time.time()
         try:

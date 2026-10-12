@@ -1,0 +1,49 @@
+# dsh 叠加层：把闲聊模型换成智谱的 GLM-4.7-Flash（免费）
+#
+# 用法（不用手敲，src/model_preset.py 会加这个参数）：
+#     dsh --profile wechat --patch dsh/model-zhipu.yml --json -
+#
+# 为什么用叠加层而不是复制一份 profile：
+#   回切就是「不加 --patch」，天然回到原样，不可能把原配置改坏。
+#
+# 这个文件里**没有密钥**。apiKeyEnv 只是一个「变量名」，
+# 真正的 Key 由 brain.py 从 config.yaml 的 dsh.zhipu_api_key 塞进子进程环境，
+# 或者你自己设一个环境变量 ZAI_API_KEY。
+#
+# 价格（2026-10 查的官方定价页）：GLM-4.7-Flash 输入/输出/缓存命中都是「免费」。
+# 但免费模型会被下线（GLM-4.5-Flash 已经在 2026-01-30 下线了），
+# 所以模型编码如果哪天报错，先去看官方定价页还在不在免费列表里。
+
+# ---- 手写一条 OpenAI 兼容路由指向智谱 ----
+# pi-ai 目录里虽然内置了 `zai`，但那个走的是 z.ai（国际站）。
+# 这里显式声明国内站的端点，行为和 Key 都更好核对。
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      zhipu:
+        displayName: 智谱 GLM
+        apiKeyEnv: ZAI_API_KEY
+        api: openai-completions
+        baseURL: https://open.bigmodel.cn/api/paas/v4
+        # 智谱的思考字段用的是 thinking.type，和 DeepSeek 一致，
+        # pi-ai 里对应这个 compat 开关。
+        compat:
+          thinkingFormat: deepseek
+        models:
+          - id: glm-4.7-flash
+            name: GLM-4.7-Flash
+            contextWindow: 200000
+            maxTokens: 32768
+            reasoningEfforts:
+              off: none
+              low: low
+              high: high
+
+# ---- 把默认模型指过去 ----
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: zhipu
+    model: glm-4.7-flash
+    reasoningEffort: low
