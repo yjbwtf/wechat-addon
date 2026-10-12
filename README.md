@@ -1360,7 +1360,17 @@ powershell -ExecutionPolicy Bypass -File tools\setup_elevated.ps1
 回切就是「不加 `--patch`」，**天然回到原样**，不存在把原配置改坏的路径。
 
 至于「不用重启」：`brain.py` 每收到一条消息都会**新起一个 `dsh` 进程**，
-profile 是那时候重新组合的。所以改完档位，下一条消息就是新模型。
+profile 是那时候重新组合的。机器人每分钟检查一次 `config.yaml` 的修改时间，
+发现变了就把这三个字段当场抄过来（见 `Bot._reload_model_preset`）——
+所以**最多一分钟内生效**，不用重启。
+
+只热切换这三个字段是有意的：它们只影响 `brain.py` 拼命令行，不涉及白名单、
+频率、人设这些「半途换掉会出事」的东西。其余配置仍然要重启才生效。
+
+实测记录（机器人不停机，13:04:06 改的文件）：
+
+    13:04:52 WARNING config.yaml 改过了，但配置只在启动时读一次 —— 要生效得停一次再启动
+    13:04:52 INFO    闲聊模型已切换：deepseek / profile 自带（按量计费） -> zhipu / glm-4.7-flash（免费）（下一条消息生效）
 
 ### 智谱的 Key 放哪
 

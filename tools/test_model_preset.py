@@ -67,6 +67,21 @@ check("不认识的档位退回 deepseek", mp.normalize("gpt5") == "deepseek")
 check("大小写/空格无所谓", mp.normalize("  ZHIPU ") == "zhipu")
 check("空值退回默认", mp.normalize(None) == "deepseek")
 
+# 4b) 「改完下一条消息生效」靠的是这个：Brain 存的是**引用**，
+#     所以 main.py 原地改 cfg.dsh 的字段，Brain 立刻就能看到。
+#     这条一旦被人改成 Brain(copy(cfg.dsh))，热切换就会静默失效 ——
+#     界面上切了档、消息还是旧模型回的，很难查。所以钉死它。
+try:
+    from src.brain import Brain  # noqa: PLC0415
+    from src.config import DshConfig  # noqa: PLC0415
+    dsh = DshConfig(command="dsh", profile="wechat")
+    b = Brain(dsh)
+    dsh.model_preset = "zhipu"
+    check("Brain 和 cfg 共享同一个 DshConfig（热切换的前提）",
+          b.cfg is dsh and b.cfg.model_preset == "zhipu")
+except Exception as exc:  # noqa: BLE001
+    check("Brain 和 cfg 共享同一个 DshConfig（热切换的前提）", False, repr(exc))
+
 # 5) 叠加层文件不存在时：不加参数、不抛异常（宁可退回默认模型，也别不回复）
 missing = Cfg("zhipu", preset_dir=str(ROOT / "dsh" / "不存在的目录"))
 try:

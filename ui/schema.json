@@ -1045,7 +1045,7 @@
    "index": 85,
    "key": "config:dsh.model_preset",
    "label": "闲聊用哪个模型",
-   "hint": "deepseek = DSH 桌面账号（按量计费）；zhipu = 智谱 GLM-4.7-Flash（官方定价免费，需要填下面的 API Key）。改完下一条消息就生效，不用重启机器人。\\agent 指令不受这个影响。",
+   "hint": "deepseek = DSH 桌面账号（按量计费）；zhipu = 智谱 GLM-4.7-Flash（官方定价免费，需要填下面的 API Key）。保存后最多一分钟自动生效，不用重启机器人（这是唯一能热切换的配置项）。\\agent 指令不受这个影响。",
    "kind": "choice",
    "wire": "str",
    "options": [

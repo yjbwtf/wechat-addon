@@ -923,11 +923,40 @@ class Bot:
             self.book.save()          # 落盘，重启不丢
 
     # ------------------------------------------------------------------ 维护
+    def _reload_model_preset(self) -> None:
+        """只把「闲聊模型档位」从磁盘抄过来，其余配置照旧要重启。
+
+        为什么只抄这三个字段：它们**只影响 brain.py 拼命令行**，不涉及
+        白名单、频率、人设这些「半途换掉会出事」的东西。换掉它们最坏的结果
+        就是下一条消息换了个模型回复，没有任何安全含义。
+
+        注意 self.brain.cfg 和 self.cfg.dsh 是**同一个对象**（Brain 存的是引用），
+        所以原地改字段，Brain 那边立刻就看到新值了。
+        """
+        try:
+            fresh = load_config(CONFIG_PATH)
+        except Exception as exc:  # noqa: BLE001
+            # 界面保存写到一半被读到、或者文件写坏了，都会走这里。
+            # 这时候**保持旧档位**最好：宁可多用一个消息周期的旧模型，
+            # 也别因为读配置失败就让机器人不回复。
+            logging.warning("重读闲聊模型档位失败（保持原样）：%s", exc)
+            return
+        before = model_preset.describe(self.cfg.dsh)
+        for name in ("model_preset", "zhipu_api_key", "preset_dir"):
+            setattr(self.cfg.dsh, name, getattr(fresh.dsh, name))
+        after = model_preset.describe(self.cfg.dsh)
+        if before != after:
+            logging.info("闲聊模型已切换：%s -> %s（下一条消息生效）", before, after)
+
     def maintain(self) -> None:
         now = time.time()
 
         # config.yaml 是启动时读一次的；改完不重启，机器人还在用旧配置，
         # 但界面上看起来「已经改好了」。这里主动提醒一句，省得猜。
+        #
+        # **例外：闲聊模型档位会即时生效。** 因为它只在 brain.py 拼命令行时用到
+        # （每条消息都新起一个 dsh），所以当场抄过来就行，不必等重启 ——
+        # 否则界面上切了档、消息还是老模型回的，比不提供这个开关更让人困惑。
         if now >= self._next_cfg_check:
             self._next_cfg_check = now + 60
             try:
@@ -937,6 +966,7 @@ class Bot:
                         "config.yaml 改过了，但配置只在启动时读一次 —— "
                         "要生效得停一次再启动（persona.yaml / memes.yaml 是实时读的，不用重启）"
                     )
+                    self._reload_model_preset()
                 self._cfg_mtime = stamp
             except OSError:
                 pass
