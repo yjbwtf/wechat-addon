@@ -18,7 +18,9 @@
    "label": "白名单群",
    "hint": "必须和微信里显示的完全一致。留空 = 不回复任何群",
    "kind": "rows",
-   "parts": ["群名"],
+   "parts": [
+    "群名"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -31,7 +33,9 @@
    "label": "机器人昵称",
    "hint": "用来识别 @",
    "kind": "rows",
-   "parts": ["机器人昵称"],
+   "parts": [
+    "机器人昵称"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -227,7 +231,9 @@
    "label": "授权昵称",
    "hint": "可以混写微信号／备注／微信昵称／群昵称：群昵称谁都能改最弱；备注只有机器人账号自己看得到，强一些；微信号改不了、群里看不到，最强。建议填微信号",
    "kind": "rows",
-   "parts": ["授权昵称"],
+   "parts": [
+    "授权昵称"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -312,7 +318,9 @@
    "label": "颜文字池",
    "hint": "程序随机抽一个挂上去",
    "kind": "rows",
-   "parts": ["颜文字"],
+   "parts": [
+    "颜文字"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -325,7 +333,9 @@
    "label": "空 @ 口头语池",
    "hint": "只 @ 了机器人却没说话时用",
    "kind": "rows",
-   "parts": ["口头语"],
+   "parts": [
+    "口头语"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -484,7 +494,7 @@
    "index": 39,
    "key": "config:commands.prefix",
    "label": "指令前缀",
-   "hint": "默认两个反斜杠。改了群里就得用新的",
+   "hint": "群里指令的开头。默认是**单个反斜杠**（\\\\截图、\\\\agent 任务）。改成别的就等于换了群里那套写法，老写法立刻失效。私聊用的是下面的「私聊简写前缀」，不受这里影响。",
    "kind": "str",
    "wire": "str",
    "options": null,
@@ -858,7 +868,7 @@
    "index": 69,
    "key": "config:screenshot.max_width",
    "label": "截图最大宽度",
-   "hint": "缩到这个宽度再发，省流量也省时间。2K/4K 屏建议保持 1920",
+   "hint": "填 0 = **按原分辨率发送**（不缩放，最清楚，流量也最大）。填数字就缩到那个宽度再发。2K/4K 屏按原分辨率发出来的图会很大。",
    "kind": "int",
    "wire": "int",
    "options": null,
@@ -908,7 +918,9 @@
    "label": "可信会话（免 @ 免口令）",
    "hint": "⚠ 这些会话里的消息**不用 @**、指令**不用口令**，也不走线程判断。\n只填你自己的私聊。私聊的发送者没法冒充，所以免口令是安全的。\n**千万别填群名**：身份校验是 any 模式时，群昵称谁都能改，群里免口令 = 把机器人的完整控制权交给任何知道你代号的人。",
    "kind": "rows",
-   "parts": ["会话名"],
+   "parts": [
+    "会话名"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -921,7 +933,9 @@
    "label": "截图触发词",
    "hint": "指令正文的第一个词只要命中就算截图。中文会往词中间插字（截图 → 截个图 / 截张图），程序还有一层「子序列匹配」兜底，所以不用把所有变体都列全，列常用的就行。",
    "kind": "rows",
-   "parts": ["触发词"],
+   "parts": [
+    "触发词"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -934,7 +948,9 @@
    "label": "agent 触发词",
    "hint": "指令正文的第一个词命中就交给本机 agent。",
    "kind": "rows",
-   "parts": ["触发词"],
+   "parts": [
+    "触发词"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -959,7 +975,9 @@
    "label": "开程序触发词",
    "hint": "支持连写（开个原神 / 帮我开星铁）和 /开 一条龙。",
    "kind": "rows",
-   "parts": ["触发词"],
+   "parts": [
+    "触发词"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -1008,7 +1026,9 @@
    "label": "重启触发词",
    "hint": "重启 = 退出再拉起（改完 config.yaml 或代码后用这个）；和「恢复」不同，恢复只是解除暂停，进程不动。persona.yaml / memes.yaml 是实时读的，不需要重启。",
    "kind": "rows",
-   "parts": ["触发词"],
+   "parts": [
+    "触发词"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -1096,7 +1116,9 @@
    "label": "刷课触发词",
    "hint": "支持连写（刷课舞台）。",
    "kind": "rows",
-   "parts": ["触发词"],
+   "parts": [
+    "触发词"
+   ],
    "wire": "list",
    "options": null,
    "on": null,
@@ -1234,29 +1256,9 @@
     {
      "t": "field",
      "index": 0
-    },
-    {
-     "t": "head",
-     "text": "开机补回"
-    },
-    {
-     "t": "note",
-     "text": "机器人停机期间错过的 @ 消息，启动后补答。只看窗口最后 N 条，不翻旧账。"
-    },
-    {
-     "t": "field",
-     "index": 10
-    },
-    {
-     "t": "field",
-     "index": 11
-    },
-    {
-     "t": "field",
-     "index": 12
     }
    ],
-   "title": "群聊"
+   "title": "群聊设置"
   },
   {
    "name": "pg_chat",
@@ -1372,13 +1374,7 @@
     {
      "t": "field",
      "index": 44
-    }
-   ],
-   "title": "连续消息"
-  },
-  {
-   "name": "pg_rate",
-   "items": [
+    },
     {
      "t": "head",
      "text": "节奏限制"
@@ -1402,9 +1398,29 @@
     {
      "t": "field",
      "index": 16
+    },
+    {
+     "t": "head",
+     "text": "开机补回"
+    },
+    {
+     "t": "note",
+     "text": "机器人停机期间错过的 @ 消息，启动后补答。只看窗口最后 N 条，不翻旧账。"
+    },
+    {
+     "t": "field",
+     "index": 10
+    },
+    {
+     "t": "field",
+     "index": 11
+    },
+    {
+     "t": "field",
+     "index": 12
     }
    ],
-   "title": "频率与安全"
+   "title": "消息设置"
   },
   {
    "name": "pg_persona",
@@ -1472,6 +1488,10 @@
     {
      "t": "field",
      "index": 47
+    },
+    {
+     "t": "button",
+     "index": 10
     },
     {
      "t": "head",
@@ -1545,11 +1565,29 @@
     },
     {
      "t": "head",
-     "text": "危险区：\\agent 远程操作"
+     "text": "可信会话"
+    },
+    {
+     "t": "field",
+     "index": 72
+    },
+    {
+     "t": "field",
+     "index": 73
+    }
+   ],
+   "title": "权限"
+  },
+  {
+   "name": "pg_cmd",
+   "items": [
+    {
+     "t": "head",
+     "text": "\\agent 远程操作"
     },
     {
      "t": "note",
-     "text": "开启后，授权的人在群里发 \\agent <任务> 就能让本机 agent 读改文件、跑命令。没有任何隔离层——能在群里发这条指令的人，等于能操作这台机器。只适合群成员都是自己人的场景，并请配合口令和 identity_mode=id。"
+     "text": "开启后，授权的人在群里发 \\agent <任务> 就能让本机 agent 读改文件、跑命令。**没有任何隔离层** —— 能在群里发这条指令的人，等于能在这台机器上做任何事。默认关闭；开启时强制要求口令。"
     },
     {
      "t": "field",
@@ -1568,12 +1606,16 @@
      "index": 65
     },
     {
+     "t": "field",
+     "index": 75
+    },
+    {
      "t": "head",
-     "text": "截图指令"
+     "text": "\\截图"
     },
     {
      "t": "note",
-     "text": "抓的是整块屏幕，包括当时开着的任何窗口。发到 19 人的群里 = 全群都看得到。只想给自己看就选 private。"
+     "text": "抓的是整块屏幕，包括当时开着的任何窗口。发到 19 人的群里 = 全群都看得到。只想给自己看就选 private。最大宽度填 0 = 原分辨率发送。"
     },
     {
      "t": "field",
@@ -1592,24 +1634,16 @@
      "index": 69
     },
     {
-     "t": "head",
-     "text": "可信会话与判断词"
-    },
-    {
-     "t": "field",
-     "index": 72
-    },
-    {
-     "t": "field",
-     "index": 73
-    },
-    {
      "t": "field",
      "index": 74
     },
     {
-     "t": "field",
-     "index": 75
+     "t": "head",
+     "text": "\\开 启动程序"
+    },
+    {
+     "t": "note",
+     "text": "走预授权提权通道，**不走模型** —— 一条指令直达，几秒返回，不花 token。能启动哪些程序由 tools\\elevated\\run.ps1 的白名单决定。"
     },
     {
      "t": "field",
@@ -1618,6 +1652,14 @@
     {
      "t": "field",
      "index": 77
+    },
+    {
+     "t": "head",
+     "text": "\\刷课"
+    },
+    {
+     "t": "note",
+     "text": "用**你自己的浏览器**打开课程页，剩下的交给油猴脚本。不走模型、不碰任何浏览器配置。课程表一行一门课：左边课程名、右边网址。"
     },
     {
      "t": "field",
@@ -1636,7 +1678,21 @@
      "index": 90
     }
    ],
-   "title": "权限"
+   "title": "指令"
+  },
+  {
+   "name": "pg_api",
+   "items": [
+    {
+     "t": "head",
+     "text": "功能性 API 接入"
+    },
+    {
+     "t": "note",
+     "text": "这块是**占位**，目前没有任何配置项。\n\n规划中放「让机器人接第三方能力」的开关：天气、翻译、图片生成、外部搜索之类。现阶段这些能力都走 DSH 的联网搜索工具，没有单独的 API 要配。\n\n真要加的时候：先在 config.yaml 里加一段、在 src/ 里实现，再把字段补进 ui/schema.json 的这一页 —— 界面本身不用改。"
+    }
+   ],
+   "title": "功能性API接入"
   },
   {
    "name": "pg_adv",
@@ -1768,6 +1824,10 @@
     {
      "t": "field",
      "index": 84
+    },
+    {
+     "t": "button",
+     "index": 11
     }
    ],
    "title": "高级"
@@ -1830,6 +1890,18 @@
   },
   {
    "label": "重新读取",
+   "primary": 0,
+   "danger": 0,
+   "width": 0
+  },
+  {
+   "label": "打开 memes.yaml",
+   "primary": 0,
+   "danger": 0,
+   "width": 0
+  },
+  {
+   "label": "清理日志",
    "primary": 0,
    "danger": 0,
    "width": 0

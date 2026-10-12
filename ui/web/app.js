@@ -176,10 +176,16 @@ function makeArea(f) {
 function makeRows(f) {
   const sep = f.sep || "|";
   const parts = f.parts && f.parts.length ? f.parts : ["", ""];
+  // 超过这个条数就默认收起，免得一个 20 条的池子把页面拉得很长。
+  const COLLAPSE_OVER = 8;
+  let collapsed = false;
   const wrap = document.createElement("div");
   wrap.className = "rows";
   const list = document.createElement("div");
   list.className = "rows-list";
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "row-toggle";
 
   const parse = (text) => String(text ?? "").split("\n")
     .map((s) => s.trim()).filter(Boolean)
@@ -207,6 +213,8 @@ function makeRows(f) {
       .map((cells) => cells.join(" " + sep + " "));
     VALUES[f.key] = lines.join("\n");
     refreshDirty();
+    // 只更新「展开 N 项 / 收起」上的数字，不动收起状态（见 rebuild 的注释）
+    if (typeof applyChrome === "function") applyChrome();
   };
 
   const addRow = (cells = [], focus = false) => {
@@ -290,6 +298,29 @@ function makeRows(f) {
     rows.forEach((cells) => addRow(cells));
     // 空表时留一个空行，打开就能打字；有内容也留一个，方便接着加
     addRow([]);
+    // 只在重建时决定要不要收起。打字途中绝不改变收起状态 ——
+    // 否则打到第 9 条时页面会突然塌下去，光标都没了。
+    collapsed = countItems() > COLLAPSE_OVER;
+    applyChrome();
+  };
+
+  // 数「有内容的行」，尾巴那个空行不算
+  const countItems = () => [...list.querySelectorAll(".row")]
+    .filter((r) => [...r.querySelectorAll("input")].some((i) => i.value.trim()))
+    .length;
+
+  const applyChrome = () => {
+    const n = countItems();
+    const many = n > COLLAPSE_OVER;
+    toggle.hidden = !many;
+    toggle.textContent = collapsed ? "展开 " + n + " 项 ▾" : "收起 ▴";
+    // 条目掉回阈值以下时无论如何都要显示出来
+    list.hidden = many && collapsed;
+    add.hidden = many && collapsed;
+  };
+  toggle.onclick = () => {
+    collapsed = !collapsed;
+    applyChrome();
   };
 
   const add = document.createElement("button");
@@ -298,7 +329,7 @@ function makeRows(f) {
   add.textContent = "＋ 添加一行";
   add.onclick = () => { addRow([], true); };
 
-  wrap.append(list, add);
+  wrap.append(toggle, list, add);
   rebuild();
   wrap._sync = rebuild;
   return wrap;
@@ -412,8 +443,21 @@ function runAction(label) {
   if (label === "刷新状态") return reload(true);
   if (label === "打开 config.yaml") return openIt("config");
   if (label === "打开 persona.yaml") return openIt("persona");
+  if (label === "打开 memes.yaml") return openIt("memes");
   if (label === "打开日志") return openIt("log");
   if (label === "打开目录") return openIt("dir");
+  if (label === "清理日志") return cleanLogs();
+}
+
+async function cleanLogs() {
+  const body = document.createElement("div");
+  body.textContent = "删掉 data\\logs 下超过保留天数的 .log。" +
+    "正在被占用的文件会跳过（不会报错）。保留天数取「日志保留天数」那个设置。";
+  confirmBox("现在清理一次日志？", body, async () => {
+    toast("正在清理…");
+    const r = await api("/api/cleanlogs", {});
+    toast(r.message, r.ok ? "ok" : "err");
+  });
 }
 
 async function openIt(which) {

@@ -273,7 +273,7 @@ class ShotConfig:
     words: list[str] = field(default_factory=lambda: ["截图", "截屏", "截个图", "截张图", "截一下图", "截个屏", "截一下屏", "屏幕截图", "屏幕截屏", "看下屏幕", "看看屏幕", "screenshot", "screen", "screencap"])
     target: str = "same"        # same = 发回指令所在的聊天；private = 私聊发给 private_to
     private_to: str = ""        # target=private 时的收件人（微信里显示的昵称）
-    max_width: int = 1920       # 缩到这个宽度，省流量也省时间
+    max_width: int = 0          # 0 = 原分辨率发送（不缩放）；填数字就缩到那个宽度
     format: str = "PNG"         # PNG | JPG
     quality: int = 82           # format=JPG 时的质量
     keep_files: int = 20        # 本地最多留几张截图
@@ -330,7 +330,10 @@ class CommandsConfig:
     """
 
     enabled: bool = True
-    prefix: str = "\\\\"                       # 两个反斜杠
+    # 单个反斜杠。原来是两个（`\\agent`），改成单个更好敲，
+    # 群里 `\截图` / `\agent xxx` 都能用。改这个等于改群里的指令写法，
+    # 老配置里如果写着 '\\' 就还是两个，以配置为准。
+    prefix: str = "\\"
     # 简写前缀：**只认开头**。
     # 用 / 是因为好敲，但也正因为 / 在正常聊天里太常见（路径、网址、分数），
     # 所以它只在可信会话里生效；群里一律走 prefix + 口令。
@@ -638,7 +641,7 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         words=[str(w) for w in (sh_raw.get("words") or ShotConfig().words)],
         target=str(sh_raw.get("target", "same")),
         private_to=str(sh_raw.get("private_to", "") or ""),
-        max_width=int(sh_raw.get("max_width", 1920)),
+        max_width=int(sh_raw.get("max_width", 0)),
         format=str(sh_raw.get("format", "PNG")),
         quality=int(sh_raw.get("quality", 82)),
         keep_files=int(sh_raw.get("keep_files", 20)),
@@ -649,7 +652,7 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
     cmd_raw = _section(raw, "commands")
     commands = CommandsConfig(
         enabled=bool(cmd_raw.get("enabled", True)),
-        prefix=str(cmd_raw.get("prefix", "\\\\")),
+        prefix=str(cmd_raw.get("prefix", "\\")),
         short_prefix=str(cmd_raw.get("short_prefix", "/") or ""),
         trusted_chats=[str(n) for n in (cmd_raw.get("trusted_chats") or [])],
         allowed_senders=[str(n) for n in (cmd_raw.get("allowed_senders") or [])],

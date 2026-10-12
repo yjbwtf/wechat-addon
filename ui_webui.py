@@ -277,6 +277,33 @@ def log_tail(lines: int = 200) -> str:
         out.append(f"===== {title}（{name}）=====\\n{tail}")
     return "\\n\\n".join(out) if out else "（还没有日志）"
 
+def clean_logs() -> dict:
+    """手动清理一次日志（界面上「清理日志」按钮）。
+
+    和机器人定时清理走的是同一个 logkeep.cleanup_logs()，参数也取自同一处
+    配置（logs.keep_days）—— 所以手动清一次和等它自己清，结果是一样的，
+    不存在"手动清得更狠/更轻"这种两套逻辑。
+    """
+    from src import logkeep                       # noqa: PLC0415
+    from src.config import CONFIG_PATH, load_config  # noqa: PLC0415
+    try:
+        cfg = load_config(CONFIG_PATH)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "message": f"读配置失败，没动任何文件：{exc}"}
+    keep = cfg.logs.keep_days
+    if keep <= 0:
+        return {"ok": False,
+                "message": "「日志保留天数」是 0 或负数 —— 那等于没定义保留多久，不删。"}
+    try:
+        removed, freed = logkeep.cleanup_logs(cfg.log_dir, keep)
+    except OSError as exc:
+        return {"ok": False, "message": f"清理出错：{exc}"}
+    if not removed:
+        return {"ok": True, "message": f"没有超过 {keep:g} 天的日志要删。"}
+    return {"ok": True,
+            "message": f"删了 {removed} 个日志，释放 {freed / 1048576:.1f} MB。"}
+
+
 def open_path(which: str) -> dict:
     targets = {
         "config": B.CONFIG_PATH,
@@ -394,6 +421,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "message": "未知动作"})
         elif path == "/api/open":
             self._json(open_path(str(payload.get("which") or "")))
+        elif path == "/api/cleanlogs":
+            self._json(clean_logs())
         else:
             self._json({"error": "unknown"}, 404)
 

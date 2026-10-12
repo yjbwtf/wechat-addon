@@ -241,7 +241,7 @@ screenshot:
   words: [截图, 截屏, screen]
   target: same                # same = 发回指令所在的聊天；private = 私聊发给 private_to
   private_to: ''              # target=private 时的收件人（微信里显示的昵称）
-  max_width: 1920             # 缩到这个宽度，省流量也省时间
+  max_width: 0                # 0 = 原分辨率发送（不缩放）；填数字就缩到那个宽度
   format: PNG                 # PNG | JPG
   quality: 82                 # format=JPG 时的质量
   keep_files: 20              # 本地最多留几张截图
@@ -256,7 +256,9 @@ screenshot:
 # --------------------------------------------------------------------------
 commands:
   enabled: true
-  prefix: '\\'
+  # 群里指令的开头。**单个反斜杠**（\截图、\agent 任务）。
+  # YAML 单引号里不转义：'\' 就是那一个；写成 "\\" 才是两个。
+  prefix: '\'
 
   # 授权名单。微信里同一个人有好几个名字，可靠程度差很多：
   #
