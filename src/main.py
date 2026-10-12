@@ -715,8 +715,9 @@ class Bot:
                 arg = first
 
         game = uid = None
+        focus = ""
         if arg:
-            game, uid, err = enka.parse_args(arg)
+            game, uid, focus, err = enka.parse_args(arg)
             if err:
                 emit(msg.group, err, split=False)
                 return
@@ -727,11 +728,14 @@ class Bot:
                 word = cfg.words[0]
                 if public:
                     tip = ("给我一个 UID，例如：%s 原神 618285856\n"
+                           "想看某个角色的圣遗物面板就在后面加名字，"
+                           "例如：%s 原神 618285856 可莉\n"
                            "游戏名可以写 原神 / 星铁 / 绝区零，也可以省略（自动认）。"
-                           % word)
+                           % (word, word))
                 else:
                     tip = ("给我一个 UID，例如：%s 618285856\n"
-                           "（游戏可选，不写就自动认：%s hsr 618285856）"
+                           "（游戏可选，不写就自动认：%s hsr 618285856；"
+                           "末尾加角色名看圣遗物面板）"
                            % (word, word))
                 emit(msg.group, tip, split=False)
                 return
@@ -739,14 +743,17 @@ class Bot:
             game = enka.ALIASES.get(cfg.default_game, None)
 
         try:
-            ok, text = enka.query(game, uid, cfg, self.enka_cache)
+            ok, text = enka.query(game, uid, cfg, self.enka_cache,
+                                  focus=focus or None)
         except Exception as exc:  # noqa: BLE001
             # 查询本身不该把主循环带崩：网络库偶尔会抛些奇怪的东西
             logging.exception("enka 查询异常：%s", exc)
             emit(msg.group, "查询出错了，看日志。", split=False)
             return
-        logging.warning("UID 查询 [%s] %s -> %s | %s",
-                        msg.group, msg.sender, uid, "成功" if ok else "失败")
+        logging.warning("UID 查询 [%s] %s -> %s%s | %s",
+                        msg.group, msg.sender, uid,
+                        (" 角色=%s" % focus) if focus else "",
+                        "成功" if ok else "失败")
         emit(msg.group, text, split=False)
 
     def handle_launch(self, msg: IncomingMessage, body: str,

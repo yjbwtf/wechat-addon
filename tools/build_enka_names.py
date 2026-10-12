@@ -1,29 +1,35 @@
-"""生成 assets/enka_names.json：角色 ID -> 中文名。
+"""生成 assets/enka_names.json：角色名 + 圣遗物套装名 + 词条名 + 物品名。
 
 ## 为什么需要它
 
-Enka 的接口只返回 `avatarId` 数字，**名字要靠一张映射表**（官方文档自己说
-这是「最大的挑战」）。完整 store 有 1.5MB（avatars + locs 六个文件），
-塞进仓库不合适；但真正要用的只有「ID -> 名字」这一列，加起来 5KB。
-
-所以这里把完整 store 压成一张紧凑表，跟着仓库走；出新角色时重跑一次本脚本。
+Enka 的接口只返回数字/哈希，**名字全靠映射表**（官方文档自己说这是
+「最大的挑战」）。完整 store 有 2MB+，但真正要用的只有四张表，
+加起来十几 KB，所以这里压成一张紧凑表跟着仓库走；出新角色/新套装时重跑。
 
 ## 数据来源
 
 用 **api.enka.network 的 store 镜像**，不是 GitHub raw —— 实测这个镜像
 直连就能拉（不需要代理），换台机器也能跑。
 
-## 三个游戏的字段名不一样（实测，不是猜的）
+## 四张表分别从哪来（都是实测出来的，不是猜的）
+
+| 表 | 来源 | 规模 |
+|---|---|---|
+| `avatar` 角色名 | 见下面「三个游戏的字段不一样」 | 312 |
+| `set` 圣遗物套装名 | `store/gi/relics.json` 的 `Sets[setId].Name` -> locs | 65 |
+| `prop` 词条名（暴击率…） | `store/gi/locs.json` 里的 `FIGHT_PROP_*` **字符串键** | 52 |
+| `text` 物品名（武器…） | `store/gi/locs.json` 里的**数字键** | 444 |
+
+注意：`locs.json` 的 zh-cn 只有 501 条，**不含**单件圣遗物的名字
+（那有几千件）。所以圣遗物按「套装 + 部位」显示，这也是玩家的习惯叫法。
+
+## 三个游戏的角色名字段不一样
 
 | 游戏 | avatars 里的名字字段 | 本地化表 |
 |---|---|---|
-| 原神   | `NameTextMapHash`（**数字** hash） | store/gi/locs.json  |
+| 原神   | `NameTextMapHash`（**数字** hash） | store/gi/locs.json |
 | 星穹铁道 | `AvatarName.Hash`（**字符串** hash） | store/hsr/hsr.json |
-| 绝区零 | `Name`（**本地化 key**，不是 hash） | store/zzz/locs.json  |
-
-- 崩铁没有 locs.json，名字在 hsr.json 里；哈希是字符串
-- 绝区零的名字字段直接是 key，例如 `Avatar_Female_Size02_Anbi` -> 安比
-- 统一 `str()` 之后再查，三个游戏走同一段代码
+| 绝区零 | `Name`（**本地化 key**，不是 hash） | store/zzz/locs.json |
 
 **踩过一次**：store 下还有一个 `store/ef/`，键是 4/6/8 这种小整数、
 字段叫 `NameHash`。第一版我把它当成了绝区零，生成出来的名字是
@@ -46,7 +52,6 @@ UA = {"User-Agent": "wechat-addon/0.1 (personal wechat bot)"}
 LANG = "zh-cn"
 
 #: 游戏 -> (avatars 路径, 本地化表路径, 从 avatars 项里取名字键的路径)
-#: 注意绝区零是 store/zzz，不是 store/ef（ef 是另一个东西，见文件头注释）
 SPEC = {
     "gi": ("store/gi/avatars.json", "store/gi/locs.json", "NameTextMapHash"),
     "hsr": ("store/hsr/avatars.json", "store/hsr/hsr.json", "AvatarName.Hash"),
@@ -77,7 +82,9 @@ def dig(item: dict, dotted: str):
 
 
 def main() -> int:
-    out: dict[str, dict[str, str]] = {}
+    out: dict[str, dict] = {}
+
+    # ---- 角色名 -------------------------------------------------------
     for game, (av_path, loc_path, field) in SPEC.items():
         print("%s:" % game)
         avatars = fetch(av_path)
@@ -98,15 +105,33 @@ def main() -> int:
                 names[aid] = name
             else:
                 missing += 1
-        out[game] = names
-        print("  -> %d 个角色有名字，%d 个查不到" % (len(names), missing))
+        out[game] = {"avatar": names}
+        print("  -> 角色 %d 个有名字，%d 个查不到" % (len(names), missing))
         print()
+
+    # ---- 原神的套装 / 词条 / 物品名 ------------------------------------
+    # 这三张表只有原神要（崩铁/绝区零的装备结构不同，还没做）
+    print("gi 的套装/词条/物品名:")
+    locs_gi = fetch("store/gi/locs.json")[LANG]
+    sets: dict[str, str] = {}
+    for sid, info in (fetch("store/gi/relics.json").get("Sets") or {}).items():
+        name = locs_gi.get(str((info or {}).get("Name")))
+        if name:
+            sets[sid] = name
+    props = {k: v for k, v in locs_gi.items() if k.startswith("FIGHT_PROP")}
+    texts = {k: v for k, v in locs_gi.items() if k.isdigit()}
+    out["gi"]["set"] = sets
+    out["gi"]["prop"] = props
+    out["gi"]["text"] = texts
+    print("  -> 套装 %d 个 / 词条 %d 个 / 物品名 %d 个" % (
+        len(sets), len(props), len(texts)))
+    print()
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(out, ensure_ascii=False, indent=1, sort_keys=True),
                    encoding="utf-8")
-    total = sum(len(v) for v in out.values())
-    print("已写入 %s：%d 个游戏 / %d 个角色 / %d 字节"
+    total = sum(len(v) for game in out.values() for v in game.values())
+    print("已写入 %s：%d 个游戏 / 一共 %d 条 / %d 字节"
           % (OUT.relative_to(ROOT), len(out), total, OUT.stat().st_size))
     return 0
 
