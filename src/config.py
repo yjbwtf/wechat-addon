@@ -413,6 +413,48 @@ def _section(raw: dict[str, Any], key: str) -> dict[str, Any]:
     return value
 
 
+def parse_courses(raw_courses) -> list[dict]:
+    """课程表。**接受两种写法**，返回统一的 [{"name":…, "url":…}]。
+
+    为什么有两种：设置界面只有一个「一行一项」的文本域（schema 的 list 类型），
+    它只能存字符串列表；而手写 config.yaml 时用对象更清楚。
+    所以：
+
+        courses:
+          - 舞台人生 | https://mooc2-ans.chaoxing.com/...     # 界面用的写法
+          - name: 高等数学                                    # 手写用的写法
+            url: https://...
+
+    分隔符 `|`（也认全角 `｜`）。名字在前、url 在后。
+    两种写法都坏掉的行会被**跳过**，不影响其它课程 ——
+    一条写错的课程不该让整条 \\刷课 指令不可用。
+    """
+    out: list[dict] = []
+    for item in raw_courses or []:
+        name = url = ""
+        if isinstance(item, dict):
+            name = str(item.get("name", "")).strip()
+            url = str(item.get("url", "")).strip()
+        elif isinstance(item, str):
+            line = item.strip()
+            if not line:
+                continue
+            # 全角竖线也认 —— 中文输入法下很容易打出来
+            for sep in ("|", "｜"):
+                if sep in line:
+                    name, _, url = line.partition(sep)
+                    name, url = name.strip(), url.strip()
+                    break
+            else:
+                # 没有分隔符：整行当 url，用 url 当名字（至少 \\刷课 <url片段> 能命中）
+                name = url = line
+        else:
+            continue
+        if name and url:
+            out.append({"name": name, "url": url})
+    return out
+
+
 def _read_delay(rl_raw: dict[str, Any]) -> tuple[float, float]:
     """回复前的随机延迟区间。
 
@@ -537,15 +579,8 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         words=[str(w) for w in
                (br_raw.get("words") or ["刷课", "上课", "挂课"])],
         browser=str(br_raw.get("browser", "") or ""),
-        # 只保留同时有 name 和 url 的条目 —— 写坏一条不该让整个指令不可用。
-        courses=[
-            {"name": str(c.get("name", "")).strip(),
-             "url": str(c.get("url", "")).strip()}
-            for c in (br_raw.get("courses") or [])
-            if isinstance(c, dict)
-            and str(c.get("name", "")).strip()
-            and str(c.get("url", "")).strip()
-        ],
+        # 两种写法都收（「名字 | url」字符串 / name+url 对象），见 parse_courses
+        courses=parse_courses(br_raw.get("courses")),
     )
 
     mu_raw = _section(raw, "memes_update")
