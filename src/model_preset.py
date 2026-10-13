@@ -66,25 +66,27 @@ def preset_dir(cfg) -> Path:
     return Path(raw) if raw else ROOT / "dsh"
 
 
-def patch_path(cfg) -> Path | None:
-    """当前档位对应的叠加层文件。默认档返回 None（不加 --patch）。
+def patch_path(cfg, preset: str | None = None) -> Path | None:
+    """档位对应的叠加层文件。默认档返回 None（不加 --patch）。
 
     返回的是**路径**，不保证文件存在 —— 调用方（brain.py）要检查。
+
+    `preset` 显式指定时用它（超时换档要用兜底档），否则读 cfg。
     """
-    name = normalize(getattr(cfg, "model_preset", DEFAULT_PRESET))
+    name = normalize(preset or getattr(cfg, "model_preset", DEFAULT_PRESET))
     filename = PRESETS[name]
     if not filename:
         return None
     return preset_dir(cfg) / filename
 
 
-def launch_args(cfg) -> list[str]:
+def launch_args(cfg, preset: str | None = None) -> list[str]:
     """追加到 dsh 命令行后面的参数。
 
     文件不存在时**不报错、也不加参数** —— 宁可退回默认模型（能聊），
     也不要因为少了一个文件就让机器人彻底不回复。
     """
-    path = patch_path(cfg)
+    path = patch_path(cfg, preset)
     if path is None:
         return []
     if not path.is_file():
@@ -93,9 +95,9 @@ def launch_args(cfg) -> list[str]:
     return ["--patch", str(path)]
 
 
-def env_overrides(cfg) -> dict[str, str]:
+def env_overrides(cfg, preset: str | None = None) -> dict[str, str]:
     """要额外塞进子进程环境的变量。目前只有智谱的 Key。"""
-    name = normalize(getattr(cfg, "model_preset", DEFAULT_PRESET))
+    name = normalize(preset or getattr(cfg, "model_preset", DEFAULT_PRESET))
     if name != "zhipu":
         return {}
     key = (getattr(cfg, "zhipu_api_key", "") or "").strip()

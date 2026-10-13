@@ -38,6 +38,14 @@ from pathlib import Path
 
 from . import mona
 
+#: 本地私有的面板渲染模块。**故意用 try 包起来**：它不是这个仓库的一部分
+#: （仿 miao-plugin 的排版 + Enka 的角色立绘，我只在本地用，见 .gitignore），
+#: 别人 clone 下来没有这个文件，这里要能安静地退化回文字。
+try:                                     # pragma: no cover
+    from . import panel as _panel
+except ImportError:                      # pragma: no cover
+    _panel = None
+
 ROOT = Path(__file__).resolve().parent.parent
 NAMES_PATH = ROOT / "assets" / "enka_names.json"
 
@@ -180,6 +188,18 @@ def _set_summary(arts: list[dict]) -> str:
     return " ".join("%s%d" % (n, c) if c > 1 else n for n, c in items)
 
 
+#: 精简结构（缓存里那份）的版本。**改了结构就加一** —— 见 Cache.get_payload。
+_PAYLOAD_VERSION = 6
+
+#: 元素 -> FIGHT_PROP 伤害加成编号（画面板时取「元素伤害加成」那一项）
+_ELEM_PROP = {"Fire": "40", "Electric": "41", "Water": "42", "Grass": "43",
+              "Wind": "44", "Rock": "45", "Ice": "46", "Physical": "30"}
+
+#: 元素 -> 中文名（画面板）
+_ELEM_CN = {"Fire": "火", "Electric": "雷", "Water": "水", "Grass": "草",
+            "Wind": "风", "Rock": "岩", "Ice": "冰", "Physical": "物理"}
+
+
 def _parse_build(avatar: dict) -> tuple[dict | None, list[dict]]:
     """从一个 avatarInfoList 元素里取出武器和 5 件圣遗物。
 
@@ -196,9 +216,19 @@ def _parse_build(avatar: dict) -> tuple[dict | None, list[dict]]:
             # affixMap 的值是「精炼等级 - 1」：0 -> 精1，2 -> 精3
             affix = (w.get("affixMap") or {}).values()
             refine = (max(affix) + 1) if affix else None
+            # 武器数值：`flat.weaponStats` 是 [{appendPropId, statValue}]。
+            # **注意单位不一致**：这里 FIGHT_PROP_CRITICAL 给的是 30.2（=30.2%），
+            # 而圣遗物那边的同一字段是 0.302（小数）。所以分开处理。
+            wattrs: dict[str, float] = {}
+            for st in (flat.get("weaponStats") or []):
+                pid = st.get("appendPropId")
+                if pid:
+                    wattrs[pid] = st.get("statValue")
             weapon = {"name": gi_text(flat.get("nameTextMapHash")) or "?",
                       "level": w.get("level"), "refine": refine,
-                      "rank": flat.get("rankLevel")}
+                      "rank": flat.get("rankLevel"),
+                      "stats": wattrs,
+                      "icon": flat.get("icon") or ""}
         elif kind == "ITEM_RELIQUARY":
             rel = e.get("reliquary") or {}
             main = flat.get("reliquaryMainstat") or {}
@@ -211,6 +241,9 @@ def _parse_build(avatar: dict) -> tuple[dict | None, list[dict]]:
                 "main": _short(main.get("mainPropId")),
                 "main_val": _stat_value(main.get("mainPropId"),
                                         main.get("statValue")),
+                # 主词条的**原始 prop**：面板要拿它去查 miao 的词条键
+                # （`main` 那串是显示用的短名，没法反查）。
+                "main_key": main.get("mainPropId"),
                 "subs": [(_short(s.get("appendPropId")),
                           _stat_value(s.get("appendPropId"), s.get("statValue")))
                          for s in (flat.get("reliquarySubstats") or [])],
@@ -597,12 +630,26 @@ class Cache:
         if float(e.get("expire", 0)) < time.time():
             return None
         p = e.get("payload")
-        return p if isinstance(p, dict) else None
+        if not isinstance(p, dict):
+            return None
+        # **改了精简结构就要把版本号加一**，否则旧缓存会当成新的用：
+        # 实测踩过 —— 给角色加上 attr（画面板要用）之后，缓存里还是旧结构，
+        # 面板那条路一直拿到 None、静默退回发文字，看起来像"功能没生效"。
+        # 缓存是跨重启的，不主动失效的话要等 ttl 过期才自愈。
+        #
+        # 版本号存在**条目**上，不塞进 payload —— payload 是调用方要用的结构，
+        # 往里加私有字段会污染它（测试里就有断言在盯这件事）。
+        if e.get("v") != _PAYLOAD_VERSION:
+            logging.debug("缓存 %s 的结构版本是 %s，当前 %s，当没命中",
+                          key, e.get("v"), _PAYLOAD_VERSION)
+            return None
+        return p
 
     def put_payload(self, key: str, payload: dict, ttl: float) -> None:
         # ttl 是「下次真的去问 MHY」的秒数；最小留 60 秒，
         # 免得接口返回 0 导致我们每次都真的去打
         self.entries[key] = {"expire": time.time() + max(60.0, ttl),
+                            "v": _PAYLOAD_VERSION,
                             "payload": payload}
         if len(self.entries) > 100:
             # 只留最新的一批。存的是精简结构（一个 UID 几 KB），
@@ -692,10 +739,48 @@ def _gi_avatars(data: dict) -> tuple[list[dict], bool]:
     for a in data.get("avatarInfoList") or []:
         lvl = ((a.get("propMap") or {}).get("4001") or {}).get("ival")
         cons = len(a.get("talentIdList") or [])
+        # 属性表（画面板用）。key 是 FIGHT_PROP 的编号，**实测出来的不是猜的**：
+        #   2000 最终生命 / 2001 最终攻击 / 2002 最终防御
+        #   20 暴击率 / 22 暴击伤害 / 23 元素充能效率 / 28 元素精通
+        #   30 物理伤害加成，40~46 = 火/雷/水/草/风/岩/冰 元素伤害加成
+        fp = a.get("fightPropMap") or {}
+        aid = str(a.get("avatarId") or "")
+        extra = ((_load().get("gi") or {}).get("extra") or {}).get(aid) or {}
+        elem = str(extra.get("e") or "")
+        attr = {"hp": fp.get("2000"), "atk": fp.get("2001"),
+                "def": fp.get("2002"), "crit": fp.get("20"),
+                "critdmg": fp.get("22"), "recharge": fp.get("23"),
+                "em": fp.get("28"),
+                "bonus": fp.get(_ELEM_PROP.get(elem, "")),
+                # 基础值（角色+武器白值）。面板上"最终值 + 绿色加成"就是
+                # 拿这两个相减 —— 实测对得上：13103 + 5598 = 18701。
+                "_base_hp": fp.get("1"), "_base_atk": fp.get("2"),
+                "_base_def": fp.get("3")}
+        # 天赋等级：`skillLevelMap` 是 {技能id: 等级}，要用 store 里的
+        # SkillOrder 把 id 对上「普攻/a、战技/e、爆发/q」。
+        # `original`（不含命座加成）分不出来，就跟 level 一样 —— 只影响
+        # 图标上那个"+"/皇冠标记，数字是对的。
+        slm = a.get("skillLevelMap") or {}
+        tmap = {}
+        skills = extra.get("sk") or {}
+        for slot, sid in zip(("a", "e", "q"), (extra.get("s") or [])):
+            lv = slm.get(str(sid)) or slm.get(sid)
+            if lv:
+                tmap[slot] = {"level": int(lv), "original": int(lv),
+                              # 天赋图标的 UI 路径（/ui/Skill_*.png）
+                              "icon": str(skills.get(str(sid)) or "")}
         out.append({"name": avatar_name("gi", a.get("avatarId")),
                     "level": str(lvl or "?"),
                     "cons": ("C%d" % cons) if cons else "",
-                    "build": _parse_build(a)})
+                    "build": _parse_build(a),
+                    # 下面几个只有面板要用；文字渲染不碰它们
+                    "talent": tmap,
+                    # 命座图标的 UI 路径（6 个，/ui/UI_Talent_S_*_NN.png）
+                    "cons_icons": [str(x) for x in
+                                   (extra.get("co") or [])][:6],
+                    "aid": aid, "element": elem,
+                    "art": str(extra.get("n") or ""),
+                    "attr": attr})
     if out:
         return out, False
     for a in ((data.get("playerInfo") or {}).get("showAvatarInfoList") or []):
@@ -976,6 +1061,41 @@ def parse_payload(game: str, data: dict) -> dict:
     if game == "hsr":
         return _hsr_payload(data)
     return _gi_payload(data)
+
+
+def panel_image(game: str, uid: str, focus: str, cache, weights: dict | None,
+                out_dir) -> "Path | None":
+    """给点名的那个角色渲一张面板图。渲不出来就返回 None（调用方退回文字）。
+
+    只做原神 —— `attr` / `art` 这两个字段只有 `_gi_payload` 填
+    （崩铁/绝区零的属性在别的表里，没做就不假装能做）。
+
+    `game` 允许是空 —— 用户不写游戏名时 `parse_args` 给的就是 None
+    （真正的游戏是 `query` 内部一个个试出来的）。这里自己去缓存里认：
+    **实测踩过**，不认的话面板永远不触发，而且不报错、静默退回发文字。
+    """
+    if _panel is None or not focus:
+        return None
+    try:
+        parsed = None
+        games = [game] if game else ["gi", "hsr", "zzz"]
+        for g in games:
+            parsed = cache.get_payload("%s:%s" % (g, uid))
+            if parsed:
+                game = g
+                break
+        if not parsed or game != "gi":
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    key = focus.strip().lower()
+    hit = next((a for a in (parsed.get("avatars") or [])
+                if key and key in (a.get("name") or "").lower()
+                and a.get("attr")), None)
+    if not hit:
+        return None
+    return _panel.render(hit, nick=parsed.get("nick") or "?", uid=uid,
+                         weights=weights, out_dir=Path(out_dir))
 
 
 def render(game: str, uid: str, parsed: dict, focus: str | None = None,

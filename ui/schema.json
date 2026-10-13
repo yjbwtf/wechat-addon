@@ -1425,6 +1425,42 @@
    "on": "1",
    "off": "0",
    "page": "api"
+  },
+  {
+   "key": "config:enka.image",
+   "label": "点名查角色时发面板图",
+   "hint": "点名（`/查询 137602053 可莉`）时，**画一张面板图**发出去，比文字直观得多。\n排版、配色、评分规则都是照 miao-plugin 的面板来的 —— 用的是**它自己的模板和 CSS**，评分也**跑它的代码**算。\n图上包含：立绘、属性（含权重）、圣遗物总分与评级、武器、五件圣遗物的主副词条与单件评分、天赋等级、命座。\n**渲不出来会自动退回发文字**，不会把查询搞死。\n需要本地有 `src/panel.py` 和 `data/miao/`（都不进版本库）。",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "api",
+   "index": 112
+  },
+  {
+   "key": "config:dsh.fallback_after_seconds",
+   "label": "多久没回就换模型（秒）",
+   "hint": "主模型超过这么久还没吐出一个字，就**换兜底档再问一次**。\n为什么要有：智谱是免费档，被挤爆时群里 @ 之后最长干等 3 分钟，这期间日志一行不动，看起来像卡死了。\n设 45 秒的话，45 秒没动静就换 DSH 内置档 —— 慢一点答，总比石沉大海好。\n`0` = 不换，一直等「单次思考超时」。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv",
+   "index": 113
+  },
+  {
+   "key": "config:dsh.fallback_preset",
+   "label": "超时后换到哪个档",
+   "hint": "留空 = 自动：当前不是 deepseek 就退回 deepseek（已经是 deepseek 就不换，没得退）。\n也可以写死成 `deepseek` 或 `zhipu`。",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "adv",
+   "index": 114
   }
  ],
  "pages": [
@@ -2030,6 +2066,14 @@
       {
        "t": "field",
        "index": 102
+      },
+      {
+       "t": "note",
+       "text": "**面板图**：把「点名查角色时发面板图」打开，上面那条 `/查询 … 可莉` 就会回一张图（排版照 miao-plugin，评分跑它的代码算）。\n**图标**：天赋/命座/立绘图标存在本地（`data/gi_icons/`，**不进版本库**），第一次用某个角色会自动拉。\n原神更新后想补新角色图标，跑一次：\n    `venv\\Scripts\\python.exe tools\\build_gi_icons.py`\n（幂等：已有的跳过，只下缺的。加 `--check` 只看缺什么。）"
+      },
+      {
+       "t": "field",
+       "index": 112
       }
      ]
     },
@@ -2132,6 +2176,14 @@
     {
      "t": "field",
      "index": 86
+    },
+    {
+     "t": "field",
+     "index": 113
+    },
+    {
+     "t": "field",
+     "index": 114
     },
     {
      "t": "head",

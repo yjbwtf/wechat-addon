@@ -785,6 +785,61 @@ hits, how = route("@鱼 随便说点什么")
 check("@鱼 随便说点什么 -> 两条路都不走（当普通聊天）",
       hits == [] and "普通聊天" in how, "%s / %s" % (hits, how))
 
+print()
+print("  面板要用到的字段（改了 _gi_payload 就必须同步 _PAYLOAD_VERSION）")
+# 这个坑踩过两次：给角色加字段（attr / art / weapon.stats）之后忘了升
+# 缓存版本，旧缓存被当成新的用 -> 面板**静默**少数据，看图和日志都不明显。
+# 把「panel 需要什么」钉成测试，别靠记性。
+fake_gi = {
+    "playerInfo": {"nickname": "甲", "level": 60},
+    "avatarInfoList": [{
+        "avatarId": 10000029,
+        "propMap": {"4001": {"ival": "90"}},
+        "talentIdList": [1, 2],
+        "fightPropMap": {"2000": 19076.0, "2001": 1695.7, "2002": 740.0,
+                         "20": 0.669, "22": 1.44, "23": 1.26, "28": 178.0,
+                         "1": 10287.0, "40": 0.904},
+        "equipList": [{
+            "flat": {"itemType": "ITEM_WEAPON",
+                     "nameTextMapHash": 0,
+                     "rankLevel": 5,
+                     "icon": "UI_EquipIcon_Catalyst_Fourwinds",
+                     "weaponStats": [
+                         {"appendPropId": "FIGHT_PROP_BASE_ATTACK",
+                          "statValue": 608.0},
+                         {"appendPropId": "FIGHT_PROP_CRITICAL",
+                          "statValue": 33.1}]},
+            "weapon": {"level": 90, "affixMap": {"0": 0}},
+        }],
+    }],
+}
+pp2 = enka.parse_payload("gi", fake_gi)
+a0 = pp2["avatars"][0]
+for key in ("name", "level", "cons", "build", "attr", "element", "art",
+            "aid"):
+    check("角色字典里有 %s" % key, key in a0, str(sorted(a0.keys())))
+for key in ("hp", "atk", "def", "crit", "critdmg", "recharge", "em",
+            "bonus", "_base_hp"):
+    check("属性里有 %s" % key, key in (a0.get("attr") or {}),
+          str(sorted((a0.get("attr") or {}).keys())))
+w0 = (a0.get("build") or (None, []))[0] or {}
+check("武器带数值 stats", bool(w0.get("stats")), str(w0))
+check("武器带图标 icon", bool(w0.get("icon")), str(w0))
+check("基础攻击是 608",
+      (w0.get("stats") or {}).get("FIGHT_PROP_BASE_ATTACK") == 608.0,
+      str(w0.get("stats")))
+arts0 = (a0.get("build") or (None, []))[1] or []
+check("圣遗物带主词条原始 prop（面板要查 miao 的词条键）",
+      not arts0 or "main_key" in arts0[0], str(arts0[:1]))
+tmpc = enka.Cache(Path(tempfile.mkdtemp()) / "v.json")
+tmpc.put_payload("gi:1", {"nick": "甲"}, 600)
+check("缓存条目上带结构版本",
+      tmpc.entries["gi:1"].get("v") == enka._PAYLOAD_VERSION,
+      str(tmpc.entries["gi:1"].get("v")))
+tmpc.entries["gi:1"]["v"] = 0
+check("版本对不上就当没命中（不会拿旧结构糊弄）",
+      tmpc.get_payload("gi:1") is None, "旧版本竟然命中了")
+
 failed = [c for c in cases if not c[1]]
 print()
 if failed:

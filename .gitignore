@@ -53,3 +53,16 @@ ui/*.pdb
 Thumbs.db
 desktop.ini
 $RECYCLE.BIN/
+
+# ---- 本地专用：面板图渲染（仿 miao-plugin 排版 + Enka 立绘，不推仓库）----
+src/panel.py
+data/panels/
+
+
+# 图标库构建脚本：只服务于本地面板（panel.py 那套），不推仓库
+tools/build_gi_icons.py
+
+
+# 发布产物（zip / 校验和）
+dist/
+

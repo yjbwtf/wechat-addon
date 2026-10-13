@@ -26,6 +26,15 @@ class DshConfig:
     command: str
     profile: str = "wechat"
     timeout_seconds: int = 180
+    #: 主模型多久没回就换兜底档（秒）。0 = 不换，一直等 timeout_seconds。
+    #:
+    #: 为什么要有它：实测智谱（免费档）被挤爆时，群里 @ 之后最长干等 3 分钟，
+    #: 这期间日志一行不动，看起来像"卡死了"。设 45 秒的话，45 秒没动静就
+    #: 用 DSH 内置档再问一次 —— 慢一点回答，总比石沉大海好。
+    fallback_after_seconds: int = 45
+    #: 换到哪个档（见 model_preset.PRESETS）。留空 = 自动：
+    #: 当前不是默认档就退回默认档，已经是默认档就不换。
+    fallback_preset: str = ""
     #: 闲聊用哪个模型。「切换」是**手动**的，不做任何自动判断。
     #:   deepseek = profile 里配的（现在是 DSH 桌面账号的 deepseek-flash，按量计费）
     #:   zhipu    = 智谱 GLM-4.7-Flash（官方定价输入/输出都是「免费」）
@@ -195,6 +204,12 @@ class EnkaConfig:
     min_interval_seconds: float = 3.0
     #: 每小时最多发几次真实请求（跨重启累计）
     max_per_hour: int = 60
+    #: 点名查角色时，**渲一张面板图发出去**而不是发文字（更直观）。
+    #:
+    #: 需要本地有 `src/panel.py` —— 那个文件**不进版本库**（仿 miao-plugin
+    #: 的排版 + Enka 的角色立绘，只在本地用，见 .gitignore）。
+    #: 没有那个模块 / 渲不出来时，自动退回发文字，不会把查询搞死。
+    image: bool = False
     #: 圣遗物评分（莫娜占卜铺的「有效词条」）
     score: EnkaScoreConfig = field(default_factory=EnkaScoreConfig)
 
@@ -711,6 +726,7 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         timeout_seconds=int(en_raw.get("timeout_seconds", 20)),
         min_interval_seconds=float(en_raw.get("min_interval_seconds", 3) or 0),
         max_per_hour=max(0, int(en_raw.get("max_per_hour", 60) or 0)),
+        image=bool(en_raw.get("image", False)),
     )
 
     wu_raw = _section(raw, "wuwa")
@@ -822,6 +838,9 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
             command=str(dsh_raw["command"]),
             profile=str(dsh_raw.get("profile", "wechat")),
             timeout_seconds=int(dsh_raw.get("timeout_seconds", 180)),
+        fallback_after_seconds=max(
+            0, int(dsh_raw.get("fallback_after_seconds", 45) or 0)),
+        fallback_preset=str(dsh_raw.get("fallback_preset", "") or ""),
             model_preset=str(dsh_raw.get("model_preset", "deepseek")).strip().lower(),
             preset_dir=str(dsh_raw.get("preset_dir", "") or ""),
             zhipu_api_key=str(dsh_raw.get("zhipu_api_key", "") or ""),

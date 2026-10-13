@@ -16,6 +16,7 @@ stderr 是诊断信息（含 reasoning），与最终答案分离。
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -219,7 +220,47 @@ class Brain:
             return None
         return None
 
+    def _ask_plans(self) -> "list[tuple[str, int]]":
+        """这次打算按什么顺序、各给多少秒。
+
+        **这不是"自动挑模型"**：档位仍然由用户手动定。这里只做一件事 ——
+        主模型迟迟不回时，别让群里干等，退一步换个档再问一次。
+
+        计划的第一项永远是当前档位，只有它超时（不是报错）才轮到第二项。
+        """
+        cur = model_preset.normalize(getattr(self.cfg, "model_preset", ""))
+        total = int(getattr(self.cfg, "timeout_seconds", 180) or 180)
+        patience = int(getattr(self.cfg, "fallback_after_seconds", 0) or 0)
+        fb = (getattr(self.cfg, "fallback_preset", "") or "").strip()
+        fb = model_preset.normalize(fb) if fb else \
+            model_preset.fallback_preset(self.cfg)
+        # 耐心必须**明显小于**总超时，否则第二项根本来不及跑
+        if fb and fb != cur and patience > 0 and patience < total - 5:
+            return [(cur, patience), (fb, total - patience)]
+        return [(cur, total)]
+
     def ask(self, prompt: str, *, user: str = "", group: str = "") -> str:
+        plans = self._ask_plans()
+        for idx, (preset, tmo) in enumerate(plans):
+            last = idx == len(plans) - 1
+            try:
+                reply = self._ask_once(prompt, preset=preset, timeout=tmo)
+            except subprocess.TimeoutExpired:
+                if last:
+                    raise BrainError(
+                        "思考超时（>%ds，档位 %s）" % (
+                            sum(x[1] for x in plans), preset)) from None
+                logging.warning(
+                    "模型 %s 超过 %ds 还没回，换 %s 再问一次（群里已等 %ds）",
+                    preset, tmo, plans[idx + 1][0], tmo)
+                continue
+            if idx:
+                logging.warning("这次是**兜底档 %s** 答的（主档 %s 超时）",
+                                preset, plans[0][0])
+            return reply
+        raise BrainError("没有可用的模型档位")
+
+    def _ask_once(self, prompt: str, *, preset: str, timeout: int) -> str:
         env = os.environ.copy()
         env.setdefault("PYTHONIOENCODING", "utf-8")
         env["PYTHONUTF8"] = "1"
@@ -227,7 +268,8 @@ class Brain:
         # 闲聊模型的档位（手动切换，见 src/model_preset.py）。
         # 每起一个 dsh 都重新读一次配置 —— 所以界面里改完档位，
         # **下一条消息就是新模型**，不用重启机器人。
-        env.update(model_preset.env_overrides(self.cfg))
+        # 档位由调用方按"计划"传进来（超时换档时会是兜底档）。
+        env.update(model_preset.env_overrides(self.cfg, preset=preset))
         argv = self._launcher_prefix()
         if argv and argv[0].lower().endswith("harness.exe"):
             env["ELECTRON_RUN_AS_NODE"] = "1"
@@ -238,7 +280,7 @@ class Brain:
         # 放到后面会被当成 app 参数，报 `unknown option '--patch'`。
         # （这个顺序错第一版就写错了，参数拼装的单元测试看不出来，
         #   真的跑一次 Brain.ask() 才炸出来。）
-        argv += model_preset.launch_args(self.cfg)
+        argv += model_preset.launch_args(self.cfg, preset=preset)
         argv += ["--json", "-"]
 
         started = time.time()
@@ -250,14 +292,16 @@ class Brain:
                 stderr=subprocess.PIPE,
                 cwd=str(self.cwd) if self.cwd else None,
                 env=env,
-                timeout=self.cfg.timeout_seconds,
+                timeout=timeout,
                 # 只有回退到 dsh.cmd（= cmd.exe）时才会有窗口问题：
                 # 机器人没有控制台，起 cmd.exe 就会新建一个空黑框。
                 # 直接调 Electron 宿主时不弹窗，这个标志也无害。
                 creationflags=no_window(),
             )
         except subprocess.TimeoutExpired:
-            raise BrainError(f"思考超时（>{self.cfg.timeout_seconds}s）")
+            # **往上抛原样的 TimeoutExpired**：ask() 要靠它决定"换档重试"。
+            # 原来这里直接转成 BrainError，调用方就分不清"超时"和"报错"了。
+            raise
         except FileNotFoundError as exc:
             raise BrainError(f"找不到 dsh 启动器：{self.cfg.command}") from exc
 

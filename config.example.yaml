@@ -17,12 +17,22 @@
 # ==========================================================================
 
 dsh:
-  # DSH 启动器路径
-  command: "C:\\\\wechat_addon\\\\venv\\\\Scripts\\\\python.exe"      # 见 start.cmd
+  # DSH 启动器（dsh.cmd）—— **必须改成你自己的**。
+  # 装好 DSH 桌面版后，在命令行里跑 `where dsh` 找它的路径，例如：
+  #     command: "C:\\Users\\你的用户名\\.dsh\\bin\\dsh.cmd"
+  # 如果 dsh 已经在 PATH 里，直接留 "dsh" 也行。
+  # （原来这里写死的是一条开发机上的路径，新用户照抄必然报
+  #   「找不到 dsh 启动器」—— 打包验包时踩到的。）
+  command: "dsh"
   # 专用 profile（已内置人设约束与工具白名单）
   profile: wechat
   # 单次思考超时（秒）
   timeout_seconds: 180
+  # 主模型超过这么久还没吐字，就换兜底档再问一次（0 = 不换）。
+  # 免费档被挤爆时不会一句不回地干等 —— 慢一点答也比石沉大海好。
+  fallback_after_seconds: 45
+  # 换到哪个档（deepseek / zhipu）。留空 = 自动退回 deepseek。
+  fallback_preset: ''
   # 闲聊用哪个模型（手动切换，机器人不替你做判断）：
   #   deepseek = profile 里配的（DSH 桌面账号，按量计费）
   #   zhipu    = 智谱 GLM-4.7-Flash（官方定价输入/输出都是「免费」）
@@ -479,6 +489,9 @@ enka:
   timeout_seconds: 20
   min_interval_seconds: 3
   max_per_hour: 60
+  # 点名查角色时发**面板图**而不是文字（排版照 miao-plugin，评分跑它的代码）。
+  # 需要本地有面板模块（不进版本库）；没有或渲不出来时自动退回发文字。
+  image: true
 
   # 圣遗物评分：莫娜占卜铺的「有效词条」（wormtql/genshin_artifact）。
   # 「以单次强化最大档位为 1 分」：每条副词条 数值 / 满档值 × 权重 求和。

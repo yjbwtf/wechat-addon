@@ -195,6 +195,9 @@ class Bot:
         self._outbox: queue.Queue = queue.Queue()
         # 全局一把锁：同一时间只允许一个耗时任务在跑
         self._busy = threading.Lock()
+        #: 每个群一把聊天锁：回复在后台线程跑，但同一个群要串行，
+        #: 否则两条回复可能交叉着发出去（读起来像精神分裂）。
+        self._chat_locks: dict[str, threading.Lock] = {}
         self._next_cfg_check = 0.0
         try:
             self._cfg_mtime = CONFIG_PATH.stat().st_mtime
@@ -365,9 +368,10 @@ class Bot:
         return True
 
     # ------------------------------------------------------------------ 直发
-    def _emit_async(self, group: str, text: str, *, split: bool = True) -> None:
+    def _emit_async(self, group: str, text: str, *, split: bool = True,
+                    at: "str | list[str] | None" = None) -> None:
         """后台线程用的"发送"：只塞队列，真正的发送留给主线程。"""
-        self._outbox.put((group, text, split))
+        self._outbox.put((group, text, split, at))
 
     def _run_async(self, label: str, msg: IncomingMessage, fn, *args) -> None:
         """把耗时指令丢到后台线程，主循环继续轮询。
@@ -404,11 +408,14 @@ class Bot:
         """主循环每轮调用：把后台线程的产出发出去。"""
         while True:
             try:
-                group, text, split = self._outbox.get_nowait()
+                item = self._outbox.get_nowait()
             except queue.Empty:
                 return
+            # 老代码塞的是三元组，这里兼容一下（别因为改结构把在跑的实例搞崩）
+            group, text, split = item[0], item[1], item[2]
+            at = item[3] if len(item) > 3 else None
             try:
-                self._say(group, text, split=split)
+                self._say(group, text, split=split, at=at)
             except Exception as exc:  # noqa: BLE001
                 logging.error("发送后台结果失败：%s", exc)
 
@@ -421,6 +428,12 @@ class Bot:
         """
         text = (text or "").strip()
         if not text:
+            return
+        # **后台线程里不能直接发**：wxauto4 走 UIA，不是线程安全的。
+        # 统一丢进 outbox，让主循环去发（和 _emit_async 一个道理）。
+        # 有了这条，flush_turn 就可以安心放后台线程跑，不会卡住消息扫描。
+        if threading.current_thread() is not threading.main_thread():
+            self._outbox.put((group, text, split, at))
             return
         parts = split_reply(text, self.cfg.split) if split else [text]
         for index, part in enumerate(parts):
@@ -808,6 +821,24 @@ class Bot:
                         msg.group, msg.sender, uid,
                         (" 角色=%s" % focus) if focus else "",
                         "成功" if ok else "失败")
+
+        # 点了名 + 开了面板 + 本地有这个模块 -> 直接发图（更直观）。
+        # 渲不出来就照旧发文字 —— **别让一张图画不出来把查询整个搞死**。
+        if ok and focus and getattr(self.cfg.enka, "image", False):
+            try:
+                img = enka.panel_image(game, uid, focus, self.enka_cache,
+                                       weights,
+                                       self.cfg.data_dir / "panels")
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("面板渲染异常：%s", exc)
+                img = None
+            if img:
+                try:
+                    self.adapter.send_file(msg.group, str(img))
+                    logging.warning("已发面板到「%s」：%s", msg.group, img.name)
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    logging.error("面板发送失败（改发文字）：%s", exc)
         emit(msg.group, text, split=False)
 
     def handle_wuwa(self, msg: IncomingMessage, body: str,
@@ -1291,12 +1322,28 @@ class Bot:
         )
 
     def flush_turns(self) -> None:
-        """把「对方已经说完」的会话整合成一次回复。"""
+        """把「对方已经说完」的会话整合成一次回复。
+
+        **丢到后台线程**：`flush_turn` 里要调模型（慢的时候几十秒），
+        在主循环里跑的话这期间**完全不扫微信** —— 群友接着发的消息、别的
+        指令全都收不到，看起来就像"机器人死了"（用户实测：日志一行不动，
+        直到模型转回来才一起恢复）。和 `_run_async` 解决的是同一个问题。
+        """
         for turn in self.agg.due():
+            threading.Thread(target=self._flush_turn_bg, args=(turn,),
+                             daemon=True, name="bg-chat").start()
+
+    def _flush_turn_bg(self, turn: Turn) -> None:
+        """后台线程：整合一个会话并回复。同群串行，避免回复交叉。"""
+        lock = self._chat_locks.get(turn.group)
+        if lock is None:
+            lock = threading.Lock()
+            self._chat_locks[turn.group] = lock
+        with lock:
             try:
                 self.flush_turn(turn)
             except KeyboardInterrupt:
-                raise
+                return
             except Exception as exc:  # noqa: BLE001
                 logging.exception("整合回复失败：%s", exc)
 

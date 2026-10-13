@@ -107,6 +107,40 @@ def main() -> int:
                 missing += 1
         out[game] = {"avatar": names}
         print("  -> 角色 %d 个有名字，%d 个查不到" % (len(names), missing))
+
+        # 原神额外存一份「立绘文件名 + 元素」——画面板要用。
+        #
+        # 立绘地址是 `https://enka.network/ui/UI_Gacha_AvatarImg_<Name>.png`
+        # （2048x1024 的竖幅，就是各家面板左边那张）。`<Name>` 从 store 的
+        # `SideIconName`（`/ui/UI_AvatarIcon_Side_Klee.png`）里剥出来 ——
+        # **不是猜的**：实测这个字段每个角色都有。
+        if game == "gi":
+            extra: dict[str, dict] = {}
+            for aid, item in avatars.items():
+                side = str(item.get("SideIconName") or "")
+                stem = side.rsplit("UI_AvatarIcon_Side_", 1)[-1]
+                stem = stem[:-4] if stem.endswith(".png") else stem
+                elem = str(item.get("Element") or "")
+                # `s` = SkillOrder：[普攻id, 战技id, 爆发id]。
+                # 天赋等级要用它把 skillLevelMap 里的 id 对上 a/e/q 三个位置。
+                order = [str(x) for x in (item.get("SkillOrder") or [])]
+                if stem:
+                    # `sk` = 技能图标（{技能id: /ui/Skill_*.png}），
+                    # `co` = 命座图标（[/ui/UI_Talent_S_*_01.png, ...] 共 6 个）。
+                    # 这两样是面板上「天赋圈/命座圈」的图标来源 —— miao 自己
+                    # 的素材里没有原神天赋图标，Enka 的 store 里才有。
+                    extra[aid] = {
+                        "n": stem, "e": elem, "s": order[:3],
+                        # 旅行者的基础条目里这些字段是字符串 "None"，
+                        # 存进来只会让下游去下 "None.webp"（404），滤掉。
+                        "sk": {str(k): v for k, v in
+                               (item.get("Skills") or {}).items()
+                               if v and str(v) != "None"},
+                        "co": [str(x) for x in (item.get("Consts") or [])
+                               if x and str(x) != "None"][:6],
+                    }
+            out[game]["extra"] = extra
+            print("  -> 立绘名/元素 %d 个" % len(extra))
         print()
 
     # ---- 原神的套装 / 词条 / 物品名 ------------------------------------

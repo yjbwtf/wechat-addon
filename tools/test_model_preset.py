@@ -177,6 +177,40 @@ try:
 except Exception as exc:  # noqa: BLE001
     check("失败兜底", False, repr(exc))
 
+print()
+print("  超时换档（brain._ask_plans）")
+# 用户实测：档位是 zhipu（免费档），群里 @ 之后最长干等 3 分钟、日志一行不动。
+# 现在给主模型一个"耐心"上限，超时就换兜底档。
+from src import brain as _brain          # noqa: E402
+from src.config import DshConfig         # noqa: E402
+
+
+def _plans(preset, after, fb="", total=180):
+    cfg = DshConfig(command="dsh", model_preset=preset,
+                    timeout_seconds=total, fallback_after_seconds=after,
+                    fallback_preset=fb)
+    return _brain.Brain(cfg)._ask_plans()
+
+
+check("zhipu 档 -> 先给 45s，再换 deepseek",
+      _plans("zhipu", 45) == [("zhipu", 45), ("deepseek", 135)],
+      str(_plans("zhipu", 45)))
+check("已经是默认档 -> 没得退，只试一次",
+      _plans("deepseek", 45) == [("deepseek", 180)],
+      str(_plans("deepseek", 45)))
+check("耐心设 0 -> 不换（一直等总超时）",
+      _plans("zhipu", 0) == [("zhipu", 180)], str(_plans("zhipu", 0)))
+check("耐心 >= 总超时 -> 不换（第二项来不及跑）",
+      _plans("zhipu", 200) == [("zhipu", 180)], str(_plans("zhipu", 200)))
+check("可以写死换回哪个档",
+      _plans("deepseek", 30, fb="zhipu") == [("deepseek", 30), ("zhipu", 150)],
+      str(_plans("deepseek", 30, fb="zhipu")))
+check("两段加起来不超过总超时",
+      sum(x[1] for x in _plans("zhipu", 60)) == 180,
+      str(_plans("zhipu", 60)))
+check("target 耐心要明显小于总超时（留 5s 余量）",
+      _plans("zhipu", 176) == [("zhipu", 180)], str(_plans("zhipu", 176)))
+
 failed = [c for c in cases if not c[1]]
 print()
 if failed:
