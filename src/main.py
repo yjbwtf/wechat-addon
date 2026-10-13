@@ -217,9 +217,15 @@ class Bot:
                                 limit=self.cfg.memes.max_entries,
                                 max_chars=self.cfg.memes.max_chars,
                                 max_history_hits=self.cfg.memes.max_history_hits)
-        if hits:
-            logging.info("梗库命中：%s", "、".join(e.term for e in hits))
-        return MemeBook.format_block(hits)
+        # 常驻的「口气/台词」（always: true）不依赖命中，每轮都带上 ——
+        # 作用等同于在 persona.yaml 里写一条语气要求，但可以在梗库里管。
+        always = self.memes.always_entries()
+        if hits or always:
+            logging.info("梗库命中：%s%s",
+                         "、".join(e.term for e in hits) or "无",
+                         ("（常驻：%s）" % "、".join(e.term for e in always))
+                         if always else "")
+        return MemeBook.format_block(hits, always=always)
 
     # ------------------------------------------------------------------ 指令
     def handle_command(self, msg: IncomingMessage, body: str) -> bool:

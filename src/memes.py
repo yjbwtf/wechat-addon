@@ -46,6 +46,16 @@ class MemeEntry:
     #:     还把回复带偏）
     #: 判断本身交给模型 —— 字面信息不足以判断，硬编码规则只会更糟。
     weak: bool = False
+    #: 常驻「口气／台词」：**不靠命中，每次回复都注入**，当成可以拿来用的素材。
+    #:
+    #: 用来放这种东西：某些主播/圈子的标志性口气和台词（「神鹰哥语录」），
+    #: 你希望机器人**在合适的场合真的这么说**，而不是只「认得这个词」。
+    #: 效果等同于在 persona.yaml 里写一条语气要求，区别是词条化之后
+    #: 能跟别的梗放一起管（\\梗 list / \\梗 del 都能用）。
+    #:
+    #: 注意：常驻 = 每轮都花 token，所以**只放少数几条短的**。
+    #: 它也不需要 alias —— 命中与否都会注入，所以不再参与 match()（免得重复注入）。
+    always: bool = False
 
     def needles(self) -> list[str]:
         out = [self.term] + list(self.aliases)
@@ -128,6 +138,7 @@ class MemeBook:
                 aliases=[str(a).strip() for a in alias if str(a).strip()],
                 source=source,
                 weak=bool(item.get("weak", False)),
+                always=bool(item.get("always", False)),
             ))
         return out
 
@@ -158,6 +169,10 @@ class MemeBook:
 
         hits: list[MemeHit] = []
         for entry in self.entries:
+            # 常驻条目不走命中 —— 它们每轮都会注入（见 always_entries），
+            # 再算一次命中就重复了。
+            if entry.always:
+                continue
             best: MemeHit | None = None
             for needle in entry.needles():
                 key = _ascii_ci(needle)
@@ -201,35 +216,56 @@ class MemeBook:
                 ctx_used += 1
         return out
 
+    def always_entries(self) -> list[MemeEntry]:
+        """常驻的「口气／台词」条目 —— 每次回复都注入，不依赖命中。"""
+        return [e for e in self.entries if e.always]
+
     @staticmethod
-    def format_block(entries: list[MemeEntry]) -> str:
-        """把命中的梗变成给模型看的一小段。
+    def format_block(entries: list[MemeEntry],
+                     always: list[MemeEntry] | None = None) -> str:
+        """把命中的梗 + 常驻口气变成给模型看的一小段。
 
         弱梗单独标出来，并且附一句「先看语境」——判断交给模型，
         因为「你干嘛」到底是在玩梗还是真的在问，只有看上下文才知道。
+
+        常驻条目（`always: true`）是**可以直接拿来用的台词/口气**，
+        渲染成单独一段，并说清「什么时候用、什么时候别用」。
         """
-        if not entries:
-            return ""
-        lines = []
-        has_weak = False
-        for e in entries:
-            note = e.note or "群里的梗，顺着接就行"
-            if e.weak:
-                has_weak = True
-                lines.append(f"[可能是梗]{e.term}={note}")
-            else:
-                lines.append(f"{e.term}={note}")
-        out = "\n".join(lines)
-        if has_weak:
-            out += ("\n（标了[可能是梗]的那几条，字面**日常也这么说** —— "
-                    "别一看到就当玩梗：先看语境（有没有人接同一个梗、"
-                    "语气是不是在闹、整条消息是不是就这几个字）。"
-                    "不是在玩梗就正常回答，**不要硬接，也不要科普这个梗**）")
-        return out
+        parts: list[str] = []
+
+        if always:
+            lines = ['%s=%s' % (e.term, e.note) for e in always]
+            head = (
+                '【可以直接拿来用的口气/台词】下面这些不是让你「认出来」的梗，'
+                '而是**可以真的这么说**的素材（跟人设里的语气要求一个性质）。'
+                '遇到对得上的场景（有人不客气、挑事、装）偶尔用一句就够：'
+                '**别每次都用、别连发、别生硬套、别解释出处、别真去威胁谁**。'
+            )
+            parts.append(head + '\n' + '\n'.join(lines))
+
+        if entries:
+            lines = []
+            has_weak = False
+            for e in entries:
+                note = e.note or "群里的梗，顺着接就行"
+                if e.weak:
+                    has_weak = True
+                    lines.append(f"[可能是梗]{e.term}={note}")
+                else:
+                    lines.append(f"{e.term}={note}")
+            block = "\n".join(lines)
+            if has_weak:
+                block += ("\n（标了[可能是梗]的那几条，字面**日常也这么说** —— "
+                          "别一看到就当玩梗：先看语境（有没有人接同一个梗、"
+                          "语气是不是在闹、整条消息是不是就这几个字）。"
+                          "不是在玩梗就正常回答，**不要硬接，也不要科普这个梗**）")
+            parts.append(block)
+
+        return "\n\n".join(parts)
 
     # ------------------------------------------------------------ 增删
     def add(self, term: str, note: str, aliases: list[str] | None = None,
-            weak: bool = False) -> str:
+            weak: bool = False, always: bool = False) -> str:
         """教一个新梗。返回给群里看的回执。
 
         `aliases` 是给自动更新用的 —— 联网捞回来的条目常带一堆变体写法
@@ -238,6 +274,9 @@ class MemeBook:
 
         `weak` 是给自动更新用的：模型判断这个梗「字面日常也这么说」时标上，
         注入时会附带「先看语境」的说明（判断交给模型，见 MemeEntry.weak）。
+
+        `always` 见 MemeEntry.always —— 常驻「口气/台词」，每次回复都注入。
+        这个**只给手工维护用**，自动更新永远不设（那会让提示词无限膨胀）。
         """
         term = (term or "").strip()
         note = (note or "").strip()
@@ -269,6 +308,10 @@ class MemeBook:
                     item["weak"] = True
                 else:
                     item.pop("weak", None)
+                if always:
+                    item["always"] = True
+                else:
+                    item.pop("always", None)
                 break
         else:
             entry: dict = {"term": term, "note": note}
@@ -276,6 +319,8 @@ class MemeBook:
                 entry["alias"] = clean_alias
             if weak:
                 entry["weak"] = True
+            if always:
+                entry["always"] = True
             items.append(entry)
 
         self.user_path.parent.mkdir(parents=True, exist_ok=True)

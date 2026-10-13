@@ -138,11 +138,69 @@ check("说明也更新了",
       {e.term: e.note for e in book4.entries}["丙弱"] == "改过的说明")
 
 print()
+print("常驻「口气/台词」：always: true")
+print()
+# 用户要求：「回复可以利用此来进行对应回答，跟我在人设里写的孙笑川相关
+# 内容一样，可以用作回答」—— 也就是**不靠命中，直接当台词用**。
+(tmp / "memes.yaml").write_text(
+    "memes:\n"
+    "  - term: 甲梗\n    note: '内置的'\n"
+    "  - term: 怼人语录\n    always: true\n    note: '可用的台词：「敢不敢比划比划」'\n",
+    encoding="utf-8")
+(tmp / "data" / "memes_user.yaml").write_text("memes: []\n", encoding="utf-8")
+
+b5 = MemeBook.load(Cfg(), tmp)
+by5 = {e.term: e for e in b5.entries}
+check("always 从 YAML 读出来", by5["怼人语录"].always is True, str(by5))
+check("普通梗不是常驻", by5["甲梗"].always is False)
+check("always_entries() 只返回常驻的",
+      [e.term for e in b5.always_entries()] == ["怼人语录"],
+      str(b5.always_entries()))
+
+check("**常驻条目不再参与 match（否则会重复注入）**",
+      [e.term for e in b5.match("怼人语录 甲梗", "", limit=6)] == ["甲梗"],
+      str([e.term for e in b5.match("怼人语录 甲梗", "", limit=6)]))
+
+blk = MemeBook.format_block([], always=b5.always_entries())
+check("常驻段有「可以直接拿来用的口气/台词」表头",
+      "可以直接拿来用的口气/台词" in blk, blk)
+check("常驻段说清了什么时候用", "有人不客气" in blk or "挑事" in blk, blk)
+check("常驻段说清了别乱用", "别每次都用" in blk and "别连发" in blk, blk)
+check("常驻段带上了台词本身", "敢不敢比划比划" in blk, blk)
+
+both = MemeBook.format_block([by5["甲梗"]], always=b5.always_entries())
+check("两段同时存在（常驻段 + 命中段）",
+      "口气/台词" in both and "甲梗=内置的" in both, both)
+check("没有命中也没有常驻 -> 空字符串（一个 token 都不花）",
+      MemeBook.format_block([], always=[]) == "")
+
+print()
+print("add(always=)：能落盘、能改回")
+print()
+b5.add("丙常驻", "常驻的口径", always=True)
+t2 = (tmp / "data" / "memes_user.yaml").read_text(encoding="utf-8")
+check("always=True 写进 YAML", "always: true" in t2, t2[-200:])
+b6 = MemeBook.load(Cfg(), tmp)
+check("重新加载后还在",
+      "丙常驻" in [e.term for e in b6.always_entries()],
+      str([e.term for e in b6.always_entries()]))
+b6.add("丙常驻", "改了", always=False)
+b7 = MemeBook.load(Cfg(), tmp)
+check("always=False 会把常驻去掉",
+      "丙常驻" not in [e.term for e in b7.always_entries()],
+      str([e.term for e in b7.always_entries()]))
+
+print()
 print("自动更新的默认值：模型没给 weak 就当弱梗（保守）")
 print()
 for raw, want in ((None, True), (True, True), (False, False)):
     weak = True if raw is None else bool(raw)
     check("模型给的 weak=%-5s -> %s" % (raw, want), weak is want)
+
+# 自动更新**永远不该**产生常驻条目（那会让每轮提示词无限膨胀）
+import src.meme_feed as feed  # noqa: E402
+check("自动更新的提示词里没有 always（常驻只能手工加）",
+      "always" not in feed.PROMPT, "PROMPT 里出现了 always")
 
 print()
 print("真实词库抽样（memes.yaml + data/memes_user.yaml）")
