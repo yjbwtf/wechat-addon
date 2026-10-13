@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,6 +44,79 @@ NOT_LOGGED_IN = (
     "    wuthering-waves-platform login\n"
     "（按提示输手机号和短信验证码；登录凭据存在 "
     "%USERPROFILE%\\.waves-platform\\credentials.json）"
+)
+
+#: 账号列表缓存多久。切账号、加账号都很罕见，而每次查询要起一个 node 进程。
+ACCOUNT_TTL = 600
+
+#: 列账号 / 切账号 / 登录的关键词（中文、英文都认）
+LIST_WORDS = ("账号", "列表", "list", "accounts")
+SWITCH_WORDS = ("切换", "切到", "换", "switch", "use")
+LOGIN_WORDS = ("登录", "login", "绑定")
+CODE_WORDS = ("验证码", "code")
+LOGOUT_WORDS = ("注销", "退出登录", "logout")
+
+#: 登录流程多久没走完就作废（秒）。验证码本身也就几分钟有效。
+LOGIN_TTL = 600
+
+
+def mask_mobile(mobile: str) -> str:
+    """手机号打码之后再往外发。
+
+    群里发的消息所有成员都看得到 —— 手机号不该原样留在聊天记录里。
+    **验证码一个字都不回显**（它等于一次登录机会）。
+    """
+    m = "".join(ch for ch in str(mobile or "") if ch.isdigit())
+    if len(m) >= 7:
+        return "%s****%s" % (m[:3], m[-4:])
+    if len(m) > 3:
+        return m[:2] + "*" * (len(m) - 3) + m[-1]
+    return "*" * len(m)
+
+
+def member_key(identity: dict | None, sender: str, *,
+               allow_nickname: bool = False) -> tuple[str, str]:
+    """把一个群成员映射成平台里的账号 ID。返回 `(key, 显示名)`。
+
+    ## 为什么优先用微信号
+
+    群昵称**谁都能改**。拿它当钥匙的话，A 把昵称改成 B 的，就能翻 B 的账号数据。
+    微信号改不了，所以它才可信。
+
+    微信号**哈希**之后才当 key —— 它要进平台自己的凭据文件、也会进日志，
+    没必要留明文。
+
+    `allow_nickname=True` 时才退回群昵称（默认不允许；拿不到微信号就拒绝，
+    并且告诉用户为什么）。
+    """
+    import hashlib
+    ident = identity or {}
+    wid = str(ident.get("id") or "").strip()
+    name = str(ident.get("nickname") or ident.get("group_nickname")
+               or sender or "").strip()
+    if wid:
+        return "wx-" + hashlib.sha1(wid.encode("utf-8")).hexdigest()[:12], \
+            name or sender
+    if allow_nickname:
+        return ("nick-" + hashlib.sha1(
+            ("nick:" + (sender or "")).encode("utf-8")).hexdigest()[:12],
+            name or sender)
+    return "", name or sender
+
+
+NO_IDENTITY = (
+    "拿不到你的微信号，这一步做不了。\n"
+    "群里昵称**谁都能改** —— 拿它当钥匙的话，别人把昵称改成你的就能翻你的号。\n"
+    "（非要放宽就把 config.yaml 里 `wuwa.allow_nickname_identity` 改成 true。）"
+)
+
+LOGIN_START = (
+    "手机号收到：%s\n\n"
+    "接下来用**这个手机号**登录库街区 App，点「获取短信验证码」，"
+    "拿到 6 位码之后发我：\n"
+    "    %s验证码 <6位码>\n\n"
+    "（%.0f 分钟内有效。平台的接口只负责「手机号 + 验证码」这一步，"
+    "**它自己不发短信** —— 所以短信得你在 App 里点。）"
 )
 
 
@@ -105,6 +179,186 @@ def call_tool(cfg, tool: str, args: dict | None = None, timeout: float = 0):
     with McpStdio(cmd, timeout=t) as c:
         c.initialize()
         return c.call_tool(tool, args or {})
+
+
+# ------------------------------------------------------------------ 账号
+def list_accounts(cfg, cache: Cache | None, *, force: bool = False) -> list[dict]:
+    """拿本地已保存的账号列表（带缓存）。
+
+    平台那边每个账号是 `{id, label, userId, serverId, roleId}`（token 被隐藏）。
+    这个列表**很少变**，而每次调用要起一个 node 进程，所以默认缓存 10 分钟；
+    切换账号时会强制刷新。
+    """
+    key = "wuwa:accounts"
+    if cache is not None and not force:
+        hit = cache.get(key, ACCOUNT_TTL)
+        if hit:
+            try:
+                got = json.loads(hit)
+                if isinstance(got, list):
+                    return [a for a in got if isinstance(a, dict)]
+            except ValueError:
+                pass
+    data = call_tool(cfg, "waves_account_list")
+    if isinstance(data, dict):
+        items = data.get("items")
+        if items is None:
+            # 有的实现直接返回 {accountId: …} 或者数组包在别的键里，兜一下
+            items = data.get("accounts") or data.get("list") or []
+    else:
+        items = data
+    out = [a for a in (items or []) if isinstance(a, dict)]
+    if cache is not None:
+        cache.put(key, json.dumps(out, ensure_ascii=False))
+    return out
+
+
+def _is_active(acc: dict) -> bool:
+    for k in ("active", "isActive", "current", "isCurrent"):
+        if acc.get(k) is True:
+            return True
+    return False
+
+
+def format_accounts(items: list[dict], *, active_id: str = "") -> str:
+    if not items:
+        return NOT_LOGGED_IN
+    lines = ["鸣潮 · 已保存 %d 个账号：" % len(items)]
+    for i, acc in enumerate(items, 1):
+        aid = str(acc.get("id") or acc.get("accountId") or "")
+        name = str(acc.get("label") or acc.get("name") or aid or "未命名")
+        bits = [name]
+        if aid and aid != name:
+            bits.append("(%s)" % aid)
+        mark = ""
+        if active_id and aid == active_id:
+            mark = "  ← 当前"
+        elif not active_id and _is_active(acc):
+            mark = "  ← 当前"
+        lines.append("  %d. %s%s" % (i, " ".join(bits), mark))
+    lines.append("用法：「鸣潮 切换 2」把 2 号设为当前；"
+                 "「鸣潮 @2 角色名」临时查 2 号（不切换）。")
+    return "\n".join(lines)
+
+
+def switch_account(cfg, cache: Cache | None, index: int) -> tuple[bool, str]:
+    """把第 index 个账号（1 开始）设为当前账号。"""
+    items = list_accounts(cfg, cache, force=True)
+    if not items:
+        return False, NOT_LOGGED_IN
+    if not 1 <= index <= len(items):
+        return False, ("没有第 %d 个账号 —— 现在有 %d 个。"
+                       "发「鸣潮 账号」看列表。" % (index, len(items)))
+    acc = items[index - 1]
+    aid = str(acc.get("id") or acc.get("accountId") or "")
+    if not aid:
+        return False, "第 %d 个账号没有 ID，切不了。" % index
+    call_tool(cfg, "waves_account_set_active", {"accountId": aid})
+    if cache is not None:
+        cache.entries.pop("wuwa:accounts", None)      # 下次重新拉
+        cache.save()
+    name = str(acc.get("label") or aid)
+    return True, "已切到账号 %d：%s" % (index, name)
+
+
+def has_account(cfg, cache: Cache | None, key: str) -> bool:
+    """这个人是不是已经登录过了（他的 key 在不在本地账号库里）。"""
+    if not key:
+        return False
+    try:
+        items = list_accounts(cfg, cache)
+    except McpError:
+        # 拿不到列表时**别拦着** —— 让他去查，真没登录平台会报
+        # CREDENTIAL_ERROR，那时给的提示更准确。
+        return True
+    return any(str(a.get("id") or a.get("accountId") or "") == key
+               for a in items)
+
+
+def start_login(cache: Cache | None, key: str, mobile: str, label: str
+                ) -> tuple[bool, str]:
+    """记下「某人正在登录」，等他回验证码。
+
+    平台没有「发验证码」这个接口（`loginBySms` 要手机号和验证码一起给），
+    所以这里只能先把手机号存着，等用户自己去 App 里点发送。
+    """
+    digits = "".join(ch for ch in str(mobile or "") if ch.isdigit())
+    if not (6 <= len(digits) <= 15):
+        return False, "手机号看着不对：%r。用法：「鸣潮 登录 13800138000」" % mobile
+    if cache is not None:
+        cache.put("login:" + key,
+                  json.dumps({"mobile": digits, "label": label,
+                              "at": time.time()}, ensure_ascii=False))
+    return True, digits
+
+
+def pending_mobile(cache: Cache | None, key: str) -> tuple[str, str]:
+    """取回「正在登录」的手机号。返回 (手机号, 显示名)，没在进行中就是空。"""
+    if cache is None:
+        return "", ""
+    raw = cache.get("login:" + key, LOGIN_TTL)
+    if not raw:
+        return "", ""
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return "", ""
+    return str(data.get("mobile") or ""), str(data.get("label") or "")
+
+
+def finish_login(cfg, cache: Cache | None, key: str, code: str
+                 ) -> tuple[bool, str]:
+    """拿手机号 + 验证码去登录，登录成功后账号归到 key 名下。"""
+    mobile, label = pending_mobile(cache, key)
+    if not mobile:
+        return False, ("没有正在进行的登录。先发「鸣潮 登录 <手机号>」，"
+                       "再去库街区 App 拿验证码。")
+    code = "".join(ch for ch in str(code or "") if ch.isdigit())
+    if not (4 <= len(code) <= 8):
+        return False, "验证码看着不对（应该是 6 位数字）。"
+    try:
+        acc = call_tool(cfg, "waves_account_login_sms", {
+            "mobile": mobile, "code": code,
+            "accountId": key, "label": label or key,
+        })
+    except McpError as exc:
+        msg = str(exc)
+        log.warning("鸣潮登录失败：%s", msg)
+        # 验证码错 / 过期是最常见的，把它翻成人话
+        if any(w in msg for w in ("验证码", "code", "失效", "过期", "错误")):
+            return False, ("登录失败：验证码不对或已过期。重新发一次"
+                           "「鸣潮 登录 %s」，再去 App 拿新码。"
+                           % mask_mobile(mobile))
+        return False, "登录失败：%s" % msg[:300]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("鸣潮登录异常：%r", exc)
+        return False, "登录出错：%s" % exc
+
+    if cache is not None:
+        cache.entries.pop("login:" + key, None)      # 用掉了
+        cache.entries.pop("wuwa:accounts", None)     # 账号列表变了
+        cache.save()
+    name = ""
+    if isinstance(acc, dict):
+        name = str(acc.get("label") or acc.get("id") or "")
+    log.warning("鸣潮登录成功：key=%s 手机=%s", key[:12], mask_mobile(mobile))
+    return True, ("登录成功%s。现在可以直接发「鸣潮」或「鸣潮 角色名」查你自己的号了。"
+                  % (("：" + name) if name else ""))
+
+
+def remove_account(cfg, cache: Cache | None, key: str) -> tuple[bool, str]:
+    """注销：把本地凭据里属于这个人的那份删掉。"""
+    try:
+        call_tool(cfg, "waves_account_remove", {"accountId": key})
+    except McpError as exc:
+        msg = str(exc)
+        if CREDENTIAL_ERROR in msg or "没有找到账号凭据" in msg:
+            return False, NOT_LOGGED_IN
+        return False, "注销失败：%s" % msg[:300]
+    if cache is not None:
+        cache.entries.pop("wuwa:accounts", None)
+        cache.save()
+    return True, "已注销（本地凭据里属于你的那份删掉了）。"
 
 
 # ------------------------------------------------------------------ 格式化
@@ -298,25 +552,105 @@ def format_all(data: dict, *, max_chars: int = 1200) -> str:
 
 
 # ------------------------------------------------------------------ 入口
-def query(cfg, cache: Cache | None, selector: str = "") -> tuple[bool, str]:
-    """查一次。返回 (成功?, 要发出去的文本)。"""
+def parse_request(text: str) -> tuple[str, str, int | None]:
+    """把参数解析成 (动作, 角色名, 账号序号)。
+
+    动作：
+        "list"    列出账号
+        "switch"  切换当前账号（角色名位置放的是序号）
+        "query"   查数据
+
+    认这几种写法（`@` 是账号序号，**刻意选一个不会跟角色名撞的符号**）：
+
+        鸣潮                 当前账号的全角色
+        鸣潮 维里奈           当前账号的某个角色
+        鸣潮 账号             列出所有账号
+        鸣潮 切换 2           把 2 号设为当前
+        鸣潮 @2              第 2 个账号的全角色
+        鸣潮 @2 维里奈        第 2 个账号的某个角色
+    """
+    s = (text or "").strip()
+    if not s:
+        return "query", "", None
+
+    # @N 前缀（账号序号）
+    index: int | None = None
+    m = re.match(r"^@\s*(\d+)\s*(.*)$", s)
+    if m:
+        index = int(m.group(1))
+        s = m.group(2).strip()
+
+    if not s:
+        return "query", "", index
+    head, _, rest = s.partition(" ")
+    head_low = head.lower()
+    if head_low in [w.lower() for w in LIST_WORDS]:
+        return "list", "", index
+    if head_low in [w.lower() for w in SWITCH_WORDS]:
+        arg = (rest or "").strip().lstrip("@")
+        try:
+            return "switch", "", int(arg)
+        except ValueError:
+            return "switch", "", None
+    if head_low in [w.lower() for w in LOGIN_WORDS]:
+        # 手机号允许带空格 / 横线 / 加号，这里只留数字
+        digits = "".join(ch for ch in (rest or "") if ch.isdigit())
+        return "login", digits, index
+    if head_low in [w.lower() for w in CODE_WORDS]:
+        code = "".join(ch for ch in (rest or "") if ch.isdigit())
+        return "code", code, index
+    if head_low in [w.lower() for w in LOGOUT_WORDS]:
+        return "logout", "", index
+    return "query", s, index
+
+
+def query(cfg, cache: Cache | None, selector: str = "",
+          account_index: int | None = None,
+          account_id: str = "") -> tuple[bool, str]:
+    """查一次。返回 (成功?, 要发出去的文本)。
+
+    账号按这个优先级：
+      1. `account_id` —— **按人归属**那个（群里每个群友各查各的，见 member_key）
+      2. `account_index` —— 序号（1 开始，从「鸣潮 账号」那份列表数）
+      3. 配置里的 `default_account`
+      4. 都不给 = 平台那边当前激活的那个
+    """
     if not getattr(cfg, "enabled", True):
         return False, "鸣潮查询没开。"
 
     selector = (selector or "").strip()
-    key = "wuwa:" + (selector or "*")
+    account = str(account_id or "").strip() \
+        or str(getattr(cfg, "default_account", "") or "").strip()
+    if account_index is not None:
+        try:
+            items = list_accounts(cfg, cache)
+        except McpError as exc:
+            msg = str(exc)
+            if CREDENTIAL_ERROR in msg or "没有找到账号凭据" in msg:
+                return False, NOT_LOGGED_IN
+            return False, "拿账号列表失败：%s" % msg[:200]
+        if not items:
+            return False, NOT_LOGGED_IN
+        if not 1 <= account_index <= len(items):
+            return False, ("没有第 %d 个账号 —— 现在有 %d 个。"
+                           "发「鸣潮 账号」看列表。" % (account_index, len(items)))
+        account = str(items[account_index - 1].get("id")
+                      or items[account_index - 1].get("accountId") or "")
+
+    # **key 必须带上账号**，否则「@1 维里奈」和「@2 维里奈」会互相串。
+    key = "wuwa:%s:%s" % (account or "*", selector or "*")
     ttl = float(getattr(cfg, "cache_seconds", 60) or 0)
     if cache is not None and ttl > 0:
         hit = cache.get(key, ttl)
         if hit:
-            log.info("鸣潮查询命中缓存：%r", selector or "(全部)")
+            log.info("鸣潮查询命中缓存：%r 账号=%r",
+                     selector or "(全部)", account or "(当前)")
             return True, hit
 
     tool = "waves_character_build" if selector else "waves_all_character_builds"
     args: dict = {}
     if selector:
         args["selector"] = selector
-    account = str(getattr(cfg, "default_account", "") or "").strip()
     if account:
         args["accountId"] = account
 
@@ -340,6 +674,8 @@ def query(cfg, cache: Cache | None, selector: str = "") -> tuple[bool, str]:
                 getattr(cfg, "max_chars", 1200) or 1200)))
     if cache is not None:
         cache.put(key, text)
-    log.warning("鸣潮查询 [%s] -> %s | 成功",
-                selector or "(全部)", "单个角色" if selector else "全角色")
+    log.warning("鸣潮查询 [%s] -> %s%s | 成功",
+                selector or "(全部)",
+                ("账号 %s " % account_index) if account_index else "",
+                "单个角色" if selector else "全角色")
     return True, text

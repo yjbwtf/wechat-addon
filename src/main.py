@@ -165,6 +165,10 @@ class Bot:
         # 鸣潮查询的短缓存（每次查询要起一个 node 进程，见 src/wuwa.py）
         self.wuwa_cache = wuwa.Cache(cfg.data_dir / "wuwa_cache.json")
         self.wuwa_cache.load()
+        # 「正在登录」的手机号（等用户回验证码）。单独一个文件，
+        # 免得和查询缓存混在一起。
+        self.wuwa_login = wuwa.Cache(cfg.data_dir / "wuwa_login.json")
+        self.wuwa_login.load()
         self.brain = Brain(cfg.dsh, cwd=cfg.data_dir / "agent-cwd")
         self.agg = Aggregator(cfg.aggregate)
         self.memes = MemeBook.load(cfg.memes, ROOT)
@@ -408,8 +412,13 @@ class Bot:
             except Exception as exc:  # noqa: BLE001
                 logging.error("发送后台结果失败：%s", exc)
 
-    def _say(self, group: str, text: str, *, split: bool = True) -> None:
-        """绕过聚合/线程，直接把一段话发到群里（指令回执、agent 结果、截图说明）。"""
+    def _say(self, group: str, text: str, *, split: bool = True,
+             at: "str | list[str] | None" = None) -> None:
+        """绕过聚合/线程，直接把一段话发到群里（指令回执、agent 结果、截图说明）。
+
+        `at` 是要 @ 的人（群里昵称）—— 走微信自己的 @ 机制，对方会收到提醒。
+        分段发送时只有**第一段**带 @，不然会被 @ 好几次。
+        """
         text = (text or "").strip()
         if not text:
             return
@@ -418,7 +427,7 @@ class Bot:
             if index:
                 time.sleep(self.gate.limiter.reply_delay_range(self.cfg.split.delay))
             try:
-                self.adapter.send(group, part)
+                self.adapter.send(group, part, at=at if index == 0 else None)
             except Exception as exc:  # noqa: BLE001
                 logging.error("发送失败：%s", exc)
                 return
@@ -664,7 +673,7 @@ class Bot:
             return False
 
     def handle_public_command(self, msg: IncomingMessage, body: str) -> bool:
-        """群友也能用的公开指令（当前只有 `/查询`）。
+        """群友也能用的公开指令（`/查询` 查展柜、`/鸣潮` 查自己的号）。
 
         **刻意不走授权和口令** —— 群友不知道口令，而查的是本来就公开的展柜数据。
         但它有三道约束，少任何一道都会变成被人刷的入口：
@@ -675,6 +684,9 @@ class Bot:
           3. **暂停/急停期间不回复**。急停的语义是「什么都不发」，
              公开指令也是回复，不该例外。
 
+        鸣潮那条也走这里，但**它只能碰自己那个账号**（账号按发送者的微信号
+        归属，见 wuwa.member_key），所以放到群里是安全的。
+
         返回值：True = 这条消息已经处理掉了；False = **它不是公开指令，
         请调用方继续走控制指令那条路**。
         """
@@ -684,8 +696,9 @@ class Bot:
         # 符号**。用户在私聊发 `/截图`，如果这里直接 return，下面那条控制指令
         # 的路就永远轮不到 —— 现象是「私聊的截图指令被识别成公开指令、
         # 然后不匹配、完全没反应」。（用户实际报的就是这个）
-        if self.gate.strict_command_kind(
-                body, {"enka": self.cfg.enka.words}) != "enka":
+        kind = self.gate.strict_command_kind(
+            body, {"enka": self.cfg.enka.words, "wuwa": self.cfg.wuwa.words})
+        if kind not in ("enka", "wuwa"):
             # 但也不能无条件交出去：群里的 `/随便乱写` 必须继续静默忽略，
             # 否则这里就成了一个开放的聊天入口。
             # 只有「它确实可能是一条控制指令」时才交 —— 也就是
@@ -697,6 +710,14 @@ class Bot:
                 return False
             logging.info("不认识的公开指令，忽略：[%s] %s -> %r",
                          msg.group, msg.sender, body[:30])
+            return True
+        # 各自还有自己的「允许群友用」开关
+        if kind == "enka" and not self.cfg.enka.allow_group_members:
+            logging.info("公开查询未对群友开放，忽略：[%s] %s", msg.group, msg.sender)
+            return True
+        if kind == "wuwa" and not self.cfg.wuwa.allow_group_members:
+            logging.info("公开鸣潮查询未对群友开放，忽略：[%s] %s",
+                         msg.group, msg.sender)
             return True
         ok, reason = self.gate.prefilter(msg.group, msg.msg_key, is_bot=msg.is_bot)
         if not ok:
@@ -711,7 +732,10 @@ class Bot:
             logging.info("公开指令被限流：[%s] %s", msg.group, why)
             return True
         self.gate.limiter.commit(msg.group)
-        self.handle_enka(msg, body, public=True)
+        if kind == "enka":
+            self.handle_enka(msg, body, public=True)
+        else:
+            self.handle_wuwa(msg, body, public=True)
         return True
 
     def handle_enka(self, msg: IncomingMessage, body: str,
@@ -787,13 +811,30 @@ class Bot:
         emit(msg.group, text, split=False)
 
     def handle_wuwa(self, msg: IncomingMessage, body: str,
-                    emit=None) -> None:
-        """`\\鸣潮 [角色名]`：查**你自己的**鸣潮账号。
+                    emit=None, *, public: bool = False) -> None:
+        """`\\鸣潮 …`：查**鸣潮**账号（wuthering-waves-platform）。
 
-        数据来自 wuthering-waves-platform 的 MCP 服务（见 src/wuwa.py）。
-        跟 `\\uid` 的区别：那个查的是公开展柜，这个查的是你登录后的
-        库街区账号 —— 所以它是**控制指令**（要授权 + 口令），
-        而且**没有「查别人」这回事**，参数只有角色名。
+        数据来自那套 MCP 服务（见 src/wuwa.py）。跟 `\\uid` 的区别：那个查的是
+        别人的公开展柜，这个查的是**登录后的库街区账号** —— 所以是「谁的号谁查」。
+
+        ## 一个群成员怎么用（这就是「哪个群友登录的、就查谁的」）
+
+            鸣潮 登录 13800138000     先给手机号
+            （机器人 @ 他，让他去 App 拿验证码）
+            鸣潮 验证码 123456        把码交回来 -> 平台登录 -> 账号归到他名下
+            鸣潮                      查他自己的号
+            鸣潮 维里奈                查他自己的某个角色
+
+        ## 账号是按什么归属的
+
+        按 **微信号的哈希**（`wuwa.member_key`）。群昵称谁都能改，拿它当钥匙
+        就等于谁都能翻别人的号，所以拿不到微信号时**直接拒绝**（除非显式把
+        `wuwa.allow_nickname_identity` 打开）。
+
+        ## 公开指令那条路只能碰自己
+
+        `public=True`（群里 `@机器人 /鸣潮 …`）时禁用「切换」和「@N」——
+        那两个是给主人用的，能指定任意账号。
         """
         if emit is None:
             emit = self._say
@@ -806,17 +847,90 @@ class Bot:
         # 剥掉指令词：`\鸣潮 维里奈` -> `维里奈`；`/鸣潮` -> 空（列全部）
         arg = self.gate.strip_command_words(
             self.gate.strip_secret(body), cfg.words)
-        # 角色名里可能有空格（少见），原样传；平台那边自己做匹配
-        selector = arg.strip()
+        action, payload, index = wuwa.parse_request(arg)
+
+        # 登录相关的动作要认人；查询也要（用来定位「谁的号」）
+        if not msg.identity and self.cfg.commands.verify_identity:
+            try:
+                msg.identity = self.adapter.resolve_identity(msg)
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("鸣潮：解析身份失败：%s", exc)
+        key, who = wuwa.member_key(
+            msg.identity, msg.sender,
+            allow_nickname=cfg.allow_nickname_identity)
+
+        # 切换 / @N 只给主人（公开那条路只能碰自己）
+        if public and (action == "switch" or index is not None):
+            logging.info("公开指令不允许指定账号：[%s] %s", msg.group, msg.sender)
+            emit(msg.group, "换账号只在私聊里能用（`\\鸣潮 @2 …`）。", split=False)
+            return
 
         try:
-            ok, text = wuwa.query(cfg, self.wuwa_cache, selector)
+            if action == "login":
+                if not key:
+                    emit(msg.group, wuwa.NO_IDENTITY, split=False)
+                    return
+                ok, mobile = wuwa.start_login(self.wuwa_login, key,
+                                              payload, who)
+                if not ok:
+                    emit(msg.group, mobile, split=False)
+                    return
+                logging.warning("鸣潮登录开始：[%s] %s 手机=%s",
+                                msg.group, msg.sender,
+                                wuwa.mask_mobile(mobile))
+                # **@ 这个群友** —— 让他知道在等他，也免得别人以为在问自己
+                emit(msg.group, wuwa.LOGIN_START % (
+                    wuwa.mask_mobile(mobile),
+                    self.cfg.wuwa.words[0], wuwa.LOGIN_TTL / 60),
+                    split=False, at=[msg.sender])
+                return
+            if action == "code":
+                if not key:
+                    emit(msg.group, wuwa.NO_IDENTITY, split=False)
+                    return
+                ok, text = wuwa.finish_login(cfg, self.wuwa_login, key, payload)
+                logging.warning("鸣潮登录 [%s] %s | %s",
+                                msg.group, msg.sender, "成功" if ok else "失败")
+                emit(msg.group, text, split=False)
+                return
+            if action == "logout":
+                if not key:
+                    emit(msg.group, wuwa.NO_IDENTITY, split=False)
+                    return
+                ok, text = wuwa.remove_account(cfg, self.wuwa_cache, key)
+                emit(msg.group, text, split=False)
+                return
+            if action == "list":
+                items = wuwa.list_accounts(cfg, self.wuwa_cache)
+                ok = bool(items)
+                text = wuwa.format_accounts(items, active_id=key)
+            elif action == "switch":
+                if not index:
+                    ok, text = False, "用法：「鸣潮 切换 <序号>」，序号看「鸣潮 账号」。"
+                else:
+                    ok, text = wuwa.switch_account(cfg, self.wuwa_cache, index)
+            else:
+                # 查询：用**这个人自己的**账号
+                if not key:
+                    emit(msg.group, wuwa.NO_IDENTITY, split=False)
+                    return
+                if not wuwa.has_account(cfg, self.wuwa_cache, key):
+                    emit(msg.group,
+                         "你还没登录鸣潮账号。发「%s登录 <手机号>」"
+                         "（私聊是 /%s登录 <手机号>），"
+                         "按提示把验证码交回来就行。"
+                         % (self.cfg.wuwa.words[0], self.cfg.wuwa.words[0]),
+                         split=False, at=[msg.sender])
+                    return
+                ok, text = wuwa.query(cfg, self.wuwa_cache, payload,
+                                      account_id=key)
         except Exception as exc:  # noqa: BLE001
             logging.exception("鸣潮查询异常：%s", exc)
             emit(msg.group, "鸣潮查询出错了，看日志。", split=False)
             return
-        logging.warning("鸣潮查询 [%s] %s -> %r | %s",
-                        msg.group, msg.sender, selector or "(全部)",
+        logging.warning("鸣潮查询 [%s] %s -> %r%s | %s",
+                        msg.group, msg.sender, arg or "(全部)",
+                        (" 账号=%s" % index) if index else "",
                         "成功" if ok else "失败")
         emit(msg.group, text, split=False)
 

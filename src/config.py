@@ -218,6 +218,17 @@ class WuwaConfig:
     enabled: bool = True
     words: list[str] = field(
         default_factory=lambda: ["鸣潮", "wuwa", "waves"])
+    #: 群友能不能用。True = 群里 `@机器人 /鸣潮 角色名` 直接能查**他自己的号**。
+    #:
+    #: 这么做是安全的，因为**每个人只能碰自己那个账号**：账号是按
+    #: 发送者的微信号（哈希后）归属的，想查别人的号得先拿别人的短信验证码。
+    #: 关掉之后只有授权者能用 `\\鸣潮`（走控制指令那条路）。
+    allow_group_members: bool = True
+    #: 拿不到微信号时，允不允许退回用群昵称当账号钥匙。
+    #:
+    #: **默认不允许。** 群昵称谁都能改 —— 允许的话，A 把昵称改成 B 的，
+    #: 就能翻 B 的账号数据。拿不到微信号时宁可直接拒绝。
+    allow_nickname_identity: bool = False
     #: 启动 MCP 服务的命令。默认用 npx 拉最新版；
     #: 想固定版本 / 用本地检出的目录，改这里就行。
     command: list[str] = field(default_factory=lambda: [
@@ -707,6 +718,9 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         enabled=bool(wu_raw.get("enabled", True)),
         words=[str(w) for w in
                (wu_raw.get("words") or ["鸣潮", "wuwa", "waves"])],
+        allow_group_members=bool(wu_raw.get("allow_group_members", True)),
+        allow_nickname_identity=bool(
+            wu_raw.get("allow_nickname_identity", False)),
         command=[str(c) for c in (wu_raw.get("command") or [
             "npx", "-y", "--package", "wuthering-waves-platform",
             "wuthering-waves-platform-mcp"])],

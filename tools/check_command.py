@@ -41,7 +41,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src import enka, mona                      # noqa: E402
+from src import enka, mona, wuwa                 # noqa: E402
 from src.config import load_config              # noqa: E402
 from src.policy import Gatekeeper               # noqa: E402
 
@@ -90,14 +90,39 @@ def analyze(text: str, cfg, group: str, sender: str = "路人") -> dict:
     # ---- 1) 公开指令（群友也能用，但要求白名单群）------------------------
     body = gate.public_command(group, text)
     if body is not None:
-        kind = gate.strict_command_kind(body, {"enka": cfg.enka.words})
+        # 公开那条路现在认两种：`/查询`（Enka 展柜）和 `/鸣潮`（查自己的号）
+        kind = gate.strict_command_kind(
+            body, {"enka": cfg.enka.words, "wuwa": cfg.wuwa.words})
         step("公开指令前缀 %r" % cfg.enka.prefix, "命中，正文 = %r" % body)
         step("指令词严格匹配", "类别 = %s" % (kind or "认不出"))
-        if kind == "enka":
+        allowed_by_switch = {
+            "enka": cfg.enka.allow_group_members,
+            "wuwa": cfg.wuwa.allow_group_members,
+        }.get(kind, True)
+        if kind in ("enka", "wuwa") and not allowed_by_switch:
+            step("开关", "「允许群友用」是关的，这条会被静默忽略")
+            out["kind"] = "ignored"
+            out["detail"]["reason"] = "%s 没对群友开放" % kind
+            return out
+        if kind in ("enka", "wuwa"):
             if not in_whitelist:
                 step("白名单", "公开指令**必须**在白名单群里，这条会被丢弃")
                 out["kind"] = "blocked"
                 out["detail"]["reason"] = "公开指令 + 不在白名单"
+                return out
+            if kind == "wuwa":
+                # 鸣潮那条要认人（每个人的号各自归属）
+                key, who = wuwa.member_key(
+                    None, "路人",
+                    allow_nickname=cfg.wuwa.allow_nickname_identity)
+                step("身份", "本脚本没有真实身份 —— 实际会用发送者的微信号"
+                     "定位是他自己那个号（拿不到就拒绝）")
+                out["kind"] = "wuwa"
+                action, payload, index = wuwa.parse_request(
+                    gate.strip_command_words(body, cfg.wuwa.words))
+                step("动作", "%s%s" % (action,
+                                      ("（%r）" % payload) if payload else ""))
+                out["detail"].update({"action": action, "payload": payload})
                 return out
             out["kind"] = "enka"
             _fill_enka(out, step, cfg, body, public=True, trusted=trusted,
@@ -234,6 +259,10 @@ def one_line(res: dict) -> str:
     if kind == "enka":
         return "enka game=%s uid=%s focus=%s" % (
             d.get("game") or "auto", d.get("uid"), d.get("focus") or "-")
+    if kind == "wuwa":
+        return "wuwa action=%s%s" % (
+            d.get("action") or "?",
+            (" payload=%r" % d["payload"]) if d.get("payload") else "")
     if kind == "blocked":
         return "blocked 不在白名单"
     if kind == "ignored":

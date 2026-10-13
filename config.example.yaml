@@ -492,18 +492,20 @@ enka:
     #   - 胡桃 | 暴击率 暴击伤害 生命值% 0.8
 
 # --------------------------------------------------------------------------
-# 鸣潮账号查询：\鸣潮 [角色名]（私聊简写是 /鸣潮 [角色名]）
+# 鸣潮账号查询：\鸣潮 …（群里也可以用公开写法 @机器人 /鸣潮 …）
 #
-# **跟上面那个 enka 不是一回事。**
-#   · enka 查的是任何人 UID 的**公开展柜**，所以它是「公开指令」；
-#   · 这条查的是**你自己登录后的库街区账号**（角色练度/声骸/体力），
-#     只能查自己，所以它是**控制指令**：要授权 + 口令。
+# **每个人各自登录、各查各的** —— 账号按发送者的**微信号**归属：
+#
+#     群里 @机器人 /鸣潮 登录 13800138000     <- 先给手机号
+#     （机器人 **@ 他**，让他去库街区 App 点「获取验证码」）
+#     群里 @机器人 /鸣潮 验证码 123456        <- 把码交回来
+#     群里 @机器人 /鸣潮 维里奈               <- 查他自己那个号
+#
+# 多个账号存在平台自己的凭据库里（一个文件，各归各的 key）。
+# **谁也不能查别人的**：想登别人的号得先拿到别人手机的验证码。
 #
 # 数据来自 wuthering-waves-platform 的 MCP 服务（需要 Node.js 22+）：
 #   https://github.com/yangfeng20/wuthering-waves-platform
-# 用之前**必须先登录一次**（要用手机号收短信，只能你自己做）：
-#     npx -y --package wuthering-waves-platform wuthering-waves-platform login
-# 凭据存在 ~/.waves-platform/credentials.json
 #
 # 注意：库街区的 Token 和 did 是绑定的。别在库街区 App、别的插件和这里
 # 反复登录同一个账号 —— 后登录的会让先前的会话失效。
@@ -511,12 +513,17 @@ enka:
 wuwa:
   enabled: true
   words: ["鸣潮", "wuwa", "waves"]
+  # 群友能不能用公开写法。**每个人只能碰自己那个账号**，所以开着是安全的。
+  allow_group_members: true
+  # 拿不到微信号时允不允许退回用群昵称当钥匙。**默认不允许** ——
+  # 群昵称谁都能改，允许的话 A 把昵称改成 B 的就能翻 B 的号。
+  allow_nickname_identity: false
   # 启动 MCP 服务的命令。想固定版本或用本地检出的目录就改这里
   # （比如 ["node", "D:/wuwa/src/mcp/server.js"]）。
   command: ["npx", "-y", "--package", "wuthering-waves-platform",
             "wuthering-waves-platform-mcp"]
   timeout_seconds: 120       # npx 第一次要下包（冷启动实测 12 秒），别给 20
   cache_seconds: 60          # 结果缓存；每次查询要起一个 node 进程
-  default_account: ''        # 多账号时指定用哪个，留空用当前激活的
+  default_account: ''        # 固定用某个账号 ID（一般留空；账号按人归属）
   max_chars: 1200            # 全角色汇总最多输出多少字
 

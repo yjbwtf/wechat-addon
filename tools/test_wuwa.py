@@ -1,4 +1,4 @@
-﻿"""鸣潮查询的测试：MCP 客户端、缓存、格式化、查询入口。
+"""鸣潮查询的测试：MCP 客户端、缓存、格式化、查询入口。
 
 ## 为什么用「假 MCP 服务」
 
@@ -14,6 +14,7 @@ wuthering-waves-platform，验过 initialize / tools/list / waves_capabilities�
 from __future__ import annotations
 
 
+import json
 import sys
 import tempfile
 import textwrap
@@ -347,6 +348,328 @@ try:
     wuwa.call_tool = real_call
     ok, text = wuwa.query(Cfg(enabled=False), None, "")
     check("关了就不查", not ok and "没开" in text, text[:60])
+finally:
+    wuwa.call_tool = real_call
+
+print()
+print("5) 多账号")
+print()
+ACCOUNTS = {"items": [
+    {"id": "acc-main", "label": "主号", "userId": "u1"},
+    {"id": "acc-alt", "label": "小号", "userId": "u2"},
+]}
+
+multi_calls: list = []
+
+
+def stub_multi(cfg, tool, args=None, timeout=0):
+    multi_calls.append((tool, dict(args or {})))
+    if tool == "waves_account_list":
+        return ACCOUNTS
+    if tool == "waves_account_set_active":
+        return {"id": (args or {}).get("accountId"), "label": "小号"}
+    if tool == "waves_character_build":
+        d = json.loads(json.dumps(BUILD))
+        d["account"] = {"label": "账号-%s" % (args or {}).get("accountId")}
+        return d
+    return ALL
+
+
+wuwa.call_tool = stub_multi
+try:
+    print("  参数解析")
+    for text, want in (("", ("query", "", None)),
+                       ("维里奈", ("query", "维里奈", None)),
+                       ("账号", ("list", "", None)),
+                       ("list", ("list", "", None)),
+                       ("切换 2", ("switch", "", 2)),
+                       ("@2", ("query", "", 2)),
+                       ("@2 维里奈", ("query", "维里奈", 2)),
+                       ("@ 3 今汐", ("query", "今汐", 3))):
+        got = wuwa.parse_request(text)
+        check("%-12r -> %s" % (text, want), got == want, "得到 %s" % (got,))
+    check("「切换」没给序号时不乱切", wuwa.parse_request("切换")[2] is None)
+
+    print()
+    print("  账号列表")
+    c8 = wuwa.Cache(TMP / "c8.json")
+    multi_calls.clear()
+    items = wuwa.list_accounts(Cfg(), c8)
+    check("拿到 2 个账号", len(items) == 2, str(items))
+    check("调的是 waves_account_list",
+          multi_calls[0][0] == "waves_account_list", str(multi_calls))
+    multi_calls.clear()
+    wuwa.list_accounts(Cfg(), c8)
+    check("**缓存住了，不再起进程**", not multi_calls, str(multi_calls))
+
+    text = wuwa.format_accounts(items, active_id="acc-alt")
+    check("列表带序号", "1. 主号" in text and "2. 小号" in text, text)
+    check("标出哪个是当前", "← 当前" in text, text)
+    check("当前标记落在第 2 个账号那行",
+          text.splitlines()[2].endswith("← 当前"), text)
+    check("给出用法提示", "切换" in text and "@2" in text, text)
+    check("账号为空 -> 直接是「怎么登录」的提示",
+          "wuthering-waves-platform login" in wuwa.format_accounts([]),
+          wuwa.format_accounts([]))
+
+    print()
+    print("  按序号查")
+    c9 = wuwa.Cache(TMP / "c9.json")
+    multi_calls.clear()
+    ok, text = wuwa.query(Cfg(), c9, "维里奈", account_index=2)
+    tools = [t for t, _ in multi_calls]
+    check("先列账号、再查角色",
+          tools == ["waves_account_list", "waves_character_build"], str(tools))
+    check("**accountId 用的是第 2 个账号的 id**",
+          multi_calls[1][1].get("accountId") == "acc-alt", str(multi_calls))
+    check("返回里有第 2 个账号的痕迹", "acc-alt" in text, text[:80])
+
+    multi_calls.clear()
+    ok, text = wuwa.query(Cfg(), c9, "维里奈", account_index=1)
+    check("第 1 个账号用的是 acc-main",
+          multi_calls[-1][1].get("accountId") == "acc-main", str(multi_calls))
+
+    # 缓存不串：用**全新的缓存**走一遍标准序列，
+    # 否则前一步刚查过的账号会命中缓存，测不出东西。
+    c9b = wuwa.Cache(TMP / "c9b.json")
+    multi_calls.clear()
+    wuwa.query(Cfg(), c9b, "维里奈", account_index=1)
+    first = [t for t, _ in multi_calls]
+    multi_calls.clear()
+    wuwa.query(Cfg(), c9b, "维里奈", account_index=2)
+    second = multi_calls
+    check("**两个账号的缓存不互相串**（@1 查完，@2 仍要真的去查）",
+          bool(second) and second[-1][1].get("accountId") == "acc-alt",
+          "第一次 %s / 第二次 %s" % (first, second))
+    multi_calls.clear()
+    wuwa.query(Cfg(), c9b, "维里奈", account_index=2)
+    check("@2 再查一次 -> 命中自己的缓存", not multi_calls, str(multi_calls))
+    multi_calls.clear()
+    wuwa.query(Cfg(), c9b, "维里奈", account_index=1)
+    check("@1 再查一次 -> 也命中自己的缓存", not multi_calls, str(multi_calls))
+
+    multi_calls.clear()
+    ok, text = wuwa.query(Cfg(), c9, "维里奈", account_index=9)
+    check("序号超范围时给提示，不报错",
+          (not ok) and "没有第 9 个账号" in text and "有 2 个" in text, text)
+    check("超范围时不发起查询",
+          all(t == "waves_account_list" for t, _ in multi_calls),
+          str(multi_calls))
+
+    print()
+    print("  切换")
+    c10 = wuwa.Cache(TMP / "c10.json")
+    wuwa.list_accounts(Cfg(), c10)          # 先填缓存
+    multi_calls.clear()
+    ok, text = wuwa.switch_account(Cfg(), c10, 2)
+    # 注意：切换会**先拉一次账号列表**（要把序号换成 id），所以看最后一次调用
+    check("调的是 waves_account_set_active",
+          multi_calls[-1][0] == "waves_account_set_active", str(multi_calls))
+    check("传的是第 2 个账号的 id",
+          multi_calls[-1][1].get("accountId") == "acc-alt", str(multi_calls))
+    check("回执里带账号名", ok and "小号" in text, text)
+    multi_calls.clear()
+    wuwa.list_accounts(Cfg(), c10)
+    check("**切换后账号列表缓存被清掉**（下次重新拉）",
+          bool(multi_calls) and multi_calls[0][0] == "waves_account_list",
+          str(multi_calls))
+
+    multi_calls.clear()
+    ok, text = wuwa.switch_account(Cfg(), c10, 7)
+    check("切不存在的序号时给提示",
+          (not ok) and "没有第 7 个账号" in text, text)
+    check("切不存在的不发 set_active",
+          all(t != "waves_account_set_active" for t, _ in multi_calls),
+          str(multi_calls))
+
+    print()
+    print("  没登录时")
+    def stub_nologin(cfg, tool, args=None, timeout=0):
+        raise McpError('{"code": "CREDENTIAL_ERROR", "message": "没有找到账号凭据"}')
+
+    wuwa.call_tool = stub_nologin
+    c11 = wuwa.Cache(TMP / "c11.json")
+    ok, text = wuwa.query(Cfg(), c11, "维里奈", account_index=1)
+    check("@N 且没登录 -> 还是那句登录提示",
+          (not ok) and "wuthering-waves-platform login" in text, text[:80])
+finally:
+    wuwa.call_tool = real_call
+
+print()
+print("6) 群里每人各自登录、各查各的")
+print()
+print("  按微信号归属（群昵称谁都能改，不能当钥匙）")
+k1, n1 = wuwa.member_key({"id": "wxid_aaa", "nickname": "小明"}, "小明")
+k2, n2 = wuwa.member_key({"id": "wxid_bbb", "nickname": "小红"}, "小红")
+check("两个人拿到不同的 key", k1 and k2 and k1 != k2, "%s / %s" % (k1, k2))
+check("key 里不含明文微信号（要进凭据文件和日志）",
+      "wxid_aaa" not in k1 and "wxid" not in k1.replace("wx-", ""), k1)
+check("key 是稳定的（同一个人每次一样）",
+      wuwa.member_key({"id": "wxid_aaa"}, "小明")[0] == k1)
+check("**昵称变了 key 不变**（这正是要防的冒充）",
+      wuwa.member_key({"id": "wxid_aaa", "nickname": "改成小红了"}, "小红")[0] == k1)
+check("**拿不到微信号就拒绝**（不给 key）",
+      wuwa.member_key({"nickname": "小明"}, "小明")[0] == "",
+      str(wuwa.member_key({"nickname": "小明"}, "小明")))
+check("显式打开 allow_nickname 才退回昵称",
+      wuwa.member_key({"nickname": "小明"}, "小明",
+                      allow_nickname=True)[0].startswith("nick-"))
+check("显示名取昵称", n1 == "小明" and n2 == "小红", "%r/%r" % (n1, n2))
+
+print()
+print("  手机号打码（群里消息所有成员都看得到）")
+check("中间打掉", wuwa.mask_mobile("13800138000") == "138****8000",
+      wuwa.mask_mobile("13800138000"))
+check("短号也不会漏", "*" in wuwa.mask_mobile("138"), wuwa.mask_mobile("138"))
+
+print()
+print("  登录两步走")
+lstore = wuwa.Cache(TMP / "login.json")
+ok, mobile = wuwa.start_login(lstore, k1, "138 0013 8000", "小明")
+check("第一步收下手机号（去掉了空格）", ok and mobile == "13800138000",
+      "%s / %s" % (ok, mobile))
+check("存住了", wuwa.pending_mobile(lstore, k1)[0] == "13800138000",
+      str(wuwa.pending_mobile(lstore, k1)))
+check("**别人的 key 查不到他的进行中登录**",
+      wuwa.pending_mobile(lstore, k2)[0] == "",
+      str(wuwa.pending_mobile(lstore, k2)))
+check("手机号不像手机号时拒绝",
+      wuwa.start_login(lstore, k1, "abc", "小明")[0] is False)
+
+login_calls: list = []
+
+
+def stub_login(cfg, tool, args=None, timeout=0):
+    login_calls.append((tool, dict(args or {})))
+    if tool == "waves_account_login_sms":
+        if (args or {}).get("code") == "000000":
+            raise McpError('{"code":"CODE_ERROR","message":"验证码错误或已失效"}')
+        return {"id": (args or {}).get("accountId"),
+                "label": (args or {}).get("label")}
+    if tool == "waves_account_list":
+        return {"items": [{"id": k1, "label": "小明"}]}
+    return ALL
+
+
+wuwa.call_tool = stub_login
+try:
+    print()
+    print("  第二步：交验证码")
+    ok, text = wuwa.finish_login(Cfg(), lstore, k1, "123456")
+    check("登录成功", ok, text)
+    check("调的是 waves_account_login_sms",
+          login_calls[0][0] == "waves_account_login_sms", str(login_calls))
+    check("**账号 ID 用的是这个人的 key**（这才叫「谁的号谁查」）",
+          login_calls[0][1].get("accountId") == k1, str(login_calls))
+    check("label 用群昵称", login_calls[0][1].get("label") == "小明",
+          str(login_calls))
+    check("传的是他留的那个手机号",
+          login_calls[0][1].get("mobile") == "13800138000", str(login_calls))
+    check("登录完把「进行中」清掉了", wuwa.pending_mobile(lstore, k1)[0] == "")
+
+    ok, text = wuwa.finish_login(Cfg(), lstore, k1, "123456")
+    check("没有进行中的登录时给提示（不是报错）",
+          (not ok) and "没有正在进行的登录" in text, text[:60])
+
+    wuwa.start_login(lstore, k1, "13800138000", "小明")
+    login_calls.clear()
+    ok, text = wuwa.finish_login(Cfg(), lstore, k1, "000000")
+    check("验证码错 -> 翻成人话，不是甩 JSON",
+          (not ok) and "验证码" in text and "{" not in text, text)
+    check("验证码错时不清掉「进行中」（让他直接重发新码）",
+          wuwa.pending_mobile(lstore, k1)[0] == "13800138000",
+          str(wuwa.pending_mobile(lstore, k1)))
+
+    print()
+    print("  有没有登录过")
+    c12 = wuwa.Cache(TMP / "c12.json")
+    check("k1 已登录", wuwa.has_account(Cfg(), c12, k1))
+    check("k2 没登录", not wuwa.has_account(Cfg(), c12, k2))
+
+    print()
+    print("  查询用的是自己的账号")
+    c13 = wuwa.Cache(TMP / "c13.json")
+    login_calls.clear()
+    wuwa.query(Cfg(), c13, "维里奈", account_id=k1)
+    check("查询带上自己的 accountId",
+          login_calls[-1][0] == "waves_character_build"
+          and login_calls[-1][1].get("accountId") == k1, str(login_calls[-1]))
+    c14 = wuwa.Cache(TMP / "c14.json")
+    login_calls.clear()
+    wuwa.query(Cfg(), c14, "维里奈", account_id=k2)
+    check("**另一个人的查询用另一个 accountId（不串）**",
+          login_calls[-1][1].get("accountId") == k2, str(login_calls[-1]))
+finally:
+    wuwa.call_tool = real_call
+
+# ---------------------------------------------------------------- @ 群友
+print()
+print("  询问验证码时要 @ 那个群友（真 @，不是文本里塞个名字）")
+print()
+import src.main as main  # noqa: E402
+from src.config import load_config  # noqa: E402
+from src.policy import Gatekeeper  # noqa: E402
+from src.wechat_io import IncomingMessage  # noqa: E402
+
+sent: list = []
+
+
+class StubStop:
+    stopped = False
+
+
+class FakeBot:
+    def __init__(self) -> None:
+        self.cfg = load_config(ROOT / "config.yaml")
+        self.gate = Gatekeeper(self.cfg)
+        self.paused = False
+        self.stop = StubStop()
+        self.wuwa_cache = wuwa.Cache(TMP / "fb_cache.json")
+        self.wuwa_login = wuwa.Cache(TMP / "fb_login.json")
+        self.adapter = None
+
+    def _say(self, group, text, *, split=True, at=None):
+        sent.append({"group": group, "text": text, "at": at})
+
+
+FakeBot.handle_wuwa = main.Bot.handle_wuwa
+FB = FakeBot()
+group = FB.cfg.commands.trusted_chats[0] if FB.cfg.commands.trusted_chats \
+    else FB.cfg.whitelist_groups[0]
+
+wuwa.call_tool = stub_login
+try:
+    sent.clear()
+    m = IncomingMessage(group=group, sender="小明", content="鸣潮 登录 13900000000",
+                        msg_key="m1")
+    m.identity = {"id": "wxid_aaa", "nickname": "小明"}
+    FB.handle_wuwa(m, "鸣潮 登录 13900000000")
+    check("回了「去拿验证码」", sent and "验证码" in sent[0]["text"],
+          str(sent)[:120])
+    check("**回执里 @ 了发指令的那个人**",
+          sent and sent[0]["at"] == ["小明"], str(sent)[:160])
+    check("手机号在群里是打码的",
+          sent and "13900000000" not in sent[0]["text"]
+          and "139****0000" in sent[0]["text"], str(sent)[:200])
+
+    sent.clear()
+    m2 = IncomingMessage(group=group, sender="路人甲", content="鸣潮 登录 13900000001",
+                         msg_key="m2")
+    m2.identity = {}          # 拿不到微信号
+    FB.handle_wuwa(m2, "鸣潮 登录 13900000001")
+    check("**拿不到微信号时不给登录**（防冒充）",
+          sent and "拿不到你的微信号" in sent[0]["text"], str(sent)[:120])
+    check("而且不 @（没必要惊动他）", sent and sent[0]["at"] is None,
+          str(sent)[:120])
+
+    sent.clear()
+    m3 = IncomingMessage(group=group, sender="小明", content="鸣潮",
+                         msg_key="m3")
+    m3.identity = {"id": "wxid_bbb", "nickname": "小明"}
+    FB.handle_wuwa(m3, "鸣潮")
+    check("没登录过时引导他去登录，并 @ 他",
+          sent and "还没登录" in sent[0]["text"] and sent[0]["at"] == ["小明"],
+          str(sent)[:160])
 finally:
     wuwa.call_tool = real_call
 

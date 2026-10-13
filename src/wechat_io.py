@@ -85,7 +85,14 @@ class BaseAdapter:
     def fetch(self) -> list[IncomingMessage]:
         raise NotImplementedError
 
-    def send(self, group: str, text: str) -> None:
+    def send(self, group: str, text: str,
+             at: "str | list[str] | None" = None) -> None:
+        """发一段文字到某个聊天。
+
+        `at` = 要 **@ 的人**（群里的昵称）。这是**微信的真 @**（对方会收到
+        提醒、能点进去），不是往文本里塞一个「@名字」—— 后者在微信里只是
+        普通字符串，提醒不会响。
+        """
         raise NotImplementedError
 
     def send_file(self, group: str, path: str) -> None:
@@ -149,9 +156,13 @@ class ConsoleAdapter(BaseAdapter):
             )
         ]
 
-    def send(self, group: str, text: str) -> None:
-        self.sent.append((group, text))
-        print(f"\n>>> 发送到「{group}」：{text}\n")
+    def send(self, group: str, text: str,
+             at: "str | list[str] | None" = None) -> None:
+        # 控制台适配器没有真 @，就把名字写在前面，方便看链路对不对
+        names = [at] if isinstance(at, str) else list(at or [])
+        prefix = "".join("@%s " % n for n in names if n)
+        self.sent.append((group, prefix + text))
+        print(f"\n>>> 发送到「{group}」：{prefix}{text}\n")
 
     def send_file(self, group: str, path: str) -> None:
         self.sent.append((group, f"[文件] {path}"))
@@ -573,12 +584,25 @@ class WxAutoAdapter(BaseAdapter):
                 return raw["chat_name"] == group, str(raw["chat_name"])
         return False, ""
 
-    def send(self, group: str, text: str) -> None:
+    def send(self, group: str, text: str,
+             at: "str | list[str] | None" = None) -> None:
         if not self._chat_with(group):
             raise RuntimeError(f"无法切换到「{group}」")
         ok, actual = self._verify_target(group)
         if not ok:
             raise RuntimeError(f"目标校验失败：期望「{group}」，当前是「{actual or '未知'}」")
+        names = [at] if isinstance(at, str) else [n for n in (at or []) if n]
+        if names:
+            # wxauto4 的 SendMsg 支持 at=，它走的是微信自己的 @ 机制。
+            # 不同版本签名可能不一样，所以**失败了就退回普通发送** ——
+            # 少一个提醒，总比整条消息发不出去强。
+            try:
+                self.wx.SendMsg(text, at=names)
+                log.info("已发送到「%s」（@%s）：%s",
+                         group, "、".join(names), text[:40])
+                return
+            except TypeError as exc:
+                log.warning("这个 wxauto 版本不支持 at=，退回普通发送：%s", exc)
         self.wx.SendMsg(text)
         log.info("已发送到「%s」：%s", group, text[:40])
 
