@@ -32,7 +32,7 @@ from .brain import Brain, BrainError, build_prompt
 from .config import CONFIG_PATH, ROOT, Config, load_config, load_persona
 from .drafts import DraftStore
 from .history import HistoryStore, StoredMessage
-from . import elevate, enka, logkeep, meme_feed, model_preset, mona
+from . import elevate, enka, logkeep, meme_feed, model_preset, mona, wuwa
 from .memes import MemeBook
 from .mood import MoodStore, parse_mood_tag
 from .policy import Gatekeeper, StopSwitch, make_msg_key
@@ -162,6 +162,9 @@ class Bot:
         self.stop = StopSwitch(cfg.data_dir)
         # Enka 查询的 ttl 缓存 + 调用配额（跨重启累计，见 src/enka.py）
         self.enka_cache = enka.Cache(cfg.data_dir / "enka_cache.json")
+        # 鸣潮查询的短缓存（每次查询要起一个 node 进程，见 src/wuwa.py）
+        self.wuwa_cache = wuwa.Cache(cfg.data_dir / "wuwa_cache.json")
+        self.wuwa_cache.load()
         self.brain = Brain(cfg.dsh, cwd=cfg.data_dir / "agent-cwd")
         self.agg = Aggregator(cfg.aggregate)
         self.memes = MemeBook.load(cfg.memes, ROOT)
@@ -238,7 +241,7 @@ class Bot:
             self.gate.strip_secret(body),
             {"agent": self.cfg.agent.words, "shot": self.cfg.screenshot.words,
              "launch": self.cfg.launch.words, "brush": self.cfg.brush.words,
-             "enka": self.cfg.enka.words},
+             "enka": self.cfg.enka.words, "wuwa": self.cfg.wuwa.words},
         )
 
         if not self.gate.authorize_command(msg.sender, msg.identity):
@@ -279,7 +282,7 @@ class Bot:
             words = self.gate.command_words(
                 {"agent": self.cfg.agent.words, "shot": self.cfg.screenshot.words,
                  "launch": self.cfg.launch.words, "brush": self.cfg.brush.words,
-                 "enka": self.cfg.enka.words})
+                 "enka": self.cfg.enka.words, "wuwa": self.cfg.wuwa.words})
             try:
                 self.adapter.send(
                     msg.group,
@@ -326,6 +329,12 @@ class Bot:
             # 一次 HTTP，通常 1 秒内回来；走后台线程反而多一层队列。
             # 慢的是网络，但 enka 模块自己有超时（默认 20 秒）。
             self.handle_enka(msg, body)
+            return True
+        elif action == "wuwa":
+            # 鸣潮这条**必须走后台线程**：它要起一个 node 进程（npx 冷启动
+            # 实测 12 秒、之后 2~3 秒），主循环停这么久会漏消息。
+            # 而且平台第一次没下过包时更慢。
+            self._run_async("鸣潮", msg, self.handle_wuwa, body)
             return True
         else:
             state = "暂停中" if (self.paused or self.stop.stopped) else "运行中"
@@ -774,6 +783,40 @@ class Bot:
         logging.warning("UID 查询 [%s] %s -> %s%s | %s",
                         msg.group, msg.sender, uid,
                         (" 角色=%s" % focus) if focus else "",
+                        "成功" if ok else "失败")
+        emit(msg.group, text, split=False)
+
+    def handle_wuwa(self, msg: IncomingMessage, body: str,
+                    emit=None) -> None:
+        """`\\鸣潮 [角色名]`：查**你自己的**鸣潮账号。
+
+        数据来自 wuthering-waves-platform 的 MCP 服务（见 src/wuwa.py）。
+        跟 `\\uid` 的区别：那个查的是公开展柜，这个查的是你登录后的
+        库街区账号 —— 所以它是**控制指令**（要授权 + 口令），
+        而且**没有「查别人」这回事**，参数只有角色名。
+        """
+        if emit is None:
+            emit = self._say
+        cfg = self.cfg.wuwa
+        if not cfg.enabled:
+            logging.info("鸣潮查询未开启")
+            emit(msg.group, "鸣潮查询没开。", split=False)
+            return
+
+        # 剥掉指令词：`\鸣潮 维里奈` -> `维里奈`；`/鸣潮` -> 空（列全部）
+        arg = self.gate.strip_command_words(
+            self.gate.strip_secret(body), cfg.words)
+        # 角色名里可能有空格（少见），原样传；平台那边自己做匹配
+        selector = arg.strip()
+
+        try:
+            ok, text = wuwa.query(cfg, self.wuwa_cache, selector)
+        except Exception as exc:  # noqa: BLE001
+            logging.exception("鸣潮查询异常：%s", exc)
+            emit(msg.group, "鸣潮查询出错了，看日志。", split=False)
+            return
+        logging.warning("鸣潮查询 [%s] %s -> %r | %s",
+                        msg.group, msg.sender, selector or "(全部)",
                         "成功" if ok else "失败")
         emit(msg.group, text, split=False)
 

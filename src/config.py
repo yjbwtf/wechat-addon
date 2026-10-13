@@ -200,6 +200,42 @@ class EnkaConfig:
 
 
 @dataclass
+class WuwaConfig:
+    """`\\鸣潮 [角色名]`：查**你自己的**鸣潮账号（wuthering-waves-platform）。
+
+    跟 Enka 那条指令最大的区别：**这不是公开数据**。
+
+      · Enka 查的是任何人 UID 的公开展柜 —— 所以它是一条「公开指令」，
+        群友 @ 一下就能用；
+      · 这条查的是你登录后的库街区账号（体力、角色练度、抽卡记录…），
+        **只能查自己**。所以它是一条**控制指令**：要授权 + 口令，
+        默认也只认私聊/可信会话，免得把个人数据摆到群里。
+
+    数据来自 [yangfeng20/wuthering-waves-platform](https://github.com/yangfeng20/wuthering-waves-platform)
+    的 MCP stdio 服务（需要 Node.js 22+，并且先 `wuthering-waves-platform login`）。
+    """
+
+    enabled: bool = True
+    words: list[str] = field(
+        default_factory=lambda: ["鸣潮", "wuwa", "waves"])
+    #: 启动 MCP 服务的命令。默认用 npx 拉最新版；
+    #: 想固定版本 / 用本地检出的目录，改这里就行。
+    command: list[str] = field(default_factory=lambda: [
+        "npx", "-y", "--package", "wuthering-waves-platform",
+        "wuthering-waves-platform-mcp"])
+    #: 单次查询超时。**别按普通 HTTP 的 20 秒来** —— npx 第一次要下包，
+    #: 实测冷启动 12 秒、之后 2~3 秒。
+    timeout_seconds: int = 120
+    #: 结果缓存秒数。平台的体力等数据变得慢，而每次查询要起一个 node 进程。
+    cache_seconds: int = 60
+    #: 多账号时指定用哪个（对应 `waves_account_set_active` 的 accountId）。
+    #: 留空 = 用当前激活的那个账号。
+    default_account: str = ""
+    #: 全角色汇总最多输出多少字（群里发一大坨没人看）。
+    max_chars: int = 1200
+
+
+@dataclass
 class LogsConfig:
     """日志的定期清理。
 
@@ -444,6 +480,7 @@ class Config:
     launch: LaunchConfig
     brush: BrushConfig
     enka: EnkaConfig
+    wuwa: "WuwaConfig"
     poll: PollConfig
     logs: LogsConfig
     threads: ThreadConfig
@@ -665,6 +702,20 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         max_per_hour=max(0, int(en_raw.get("max_per_hour", 60) or 0)),
     )
 
+    wu_raw = _section(raw, "wuwa")
+    wuwa = WuwaConfig(
+        enabled=bool(wu_raw.get("enabled", True)),
+        words=[str(w) for w in
+               (wu_raw.get("words") or ["鸣潮", "wuwa", "waves"])],
+        command=[str(c) for c in (wu_raw.get("command") or [
+            "npx", "-y", "--package", "wuthering-waves-platform",
+            "wuthering-waves-platform-mcp"])],
+        timeout_seconds=int(wu_raw.get("timeout_seconds", 120) or 120),
+        cache_seconds=int(wu_raw.get("cache_seconds", 60) or 0),
+        default_account=str(wu_raw.get("default_account", "") or "").strip(),
+        max_chars=int(wu_raw.get("max_chars", 1200) or 1200),
+    )
+
     mu_raw = _section(raw, "memes_update")
     memes_update = AutoUpdateConfig(
         enabled=bool(mu_raw.get("enabled", True)),
@@ -778,6 +829,7 @@ def load_config(path: Path | str = CONFIG_PATH) -> Config:
         launch=launch,
         brush=brush,
         enka=enka,
+        wuwa=wuwa,
         poll=poll,
         logs=logs,
         threads=threads,

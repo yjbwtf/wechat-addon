@@ -137,7 +137,7 @@ def analyze(text: str, cfg, group: str, sender: str = "路人") -> dict:
     if ctl is not None:
         words = {"agent": cfg.agent.words, "shot": cfg.screenshot.words,
                  "launch": cfg.launch.words, "brush": cfg.brush.words,
-                 "enka": cfg.enka.words}
+                 "enka": cfg.enka.words, "wuwa": cfg.wuwa.words}
         action = gate.classify_command(ctl, words)
         step("控制指令", "命中，正文 = %r，类别 = %s" % (ctl, action or "认不出"))
         step("白名单", "控制指令**不做要求**（主人要能从任何群停机）")
@@ -174,7 +174,8 @@ def _hint_control(out: dict, step, cfg, gate: Gatekeeper, body: str) -> None:
     随便一个人），所以这里替它解释一句。
     """
     words_ctl = {"agent": cfg.agent.words, "shot": cfg.screenshot.words,
-                 "launch": cfg.launch.words, "brush": cfg.brush.words}
+                 "launch": cfg.launch.words, "brush": cfg.brush.words,
+                 "wuwa": cfg.wuwa.words}
     as_ctl = gate.classify_command(body, words_ctl)
     if as_ctl:
         step("提示", "「%s」是**控制指令**，要用群前缀 %r（还要口令）；"

@@ -1311,6 +1311,96 @@
    "parts": [
     "角色 | 词条…"
    ]
+  },
+  {
+   "index": 103,
+   "key": "config:wuwa.enabled",
+   "label": "启用鸣潮查询",
+   "hint": "关掉之后 `\\鸣潮`（私聊 `/鸣潮`）就不再用。不影响别的功能。",
+   "kind": "bool",
+   "wire": "bool",
+   "options": null,
+   "on": "1",
+   "off": "0",
+   "page": "api"
+  },
+  {
+   "index": 104,
+   "key": "config:wuwa.words",
+   "label": "触发词",
+   "hint": "跟着 `\\` 就是群里那条，跟着 `/` 就是私聊简写。",
+   "kind": "rows",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api",
+   "parts": [
+    "词语"
+   ]
+  },
+  {
+   "index": 105,
+   "key": "config:wuwa.command",
+   "label": "启动命令",
+   "hint": "启动 wuthering-waves-platform 那个 MCP 服务的命令，**一个词一行**。\n默认用 npx 拉最新版；想固定版本或用本地检出的目录就改这里，例如：\n`node` / `D:/wuwa/src/mcp/server.js`",
+   "kind": "rows",
+   "wire": "list",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api",
+   "parts": [
+    "词"
+   ]
+  },
+  {
+   "index": 106,
+   "key": "config:wuwa.timeout_seconds",
+   "label": "查询超时（秒）",
+   "hint": "**别按普通 HTTP 的 20 秒来** —— npx 第一次要下包，实测冷启动 12 秒。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api"
+  },
+  {
+   "index": 107,
+   "key": "config:wuwa.cache_seconds",
+   "label": "结果缓存（秒）",
+   "hint": "同样的查询在这个时间内直接用缓存。每次查询都要起一个 node 进程（2~3 秒），缓存很划算。填 0 = 不缓存。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api"
+  },
+  {
+   "index": 108,
+   "key": "config:wuwa.default_account",
+   "label": "指定账号",
+   "hint": "装了多账号时填账号 ID（对应 `waves_account_set_active`）。留空 = 用当前激活的那个。",
+   "kind": "str",
+   "wire": "str",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api"
+  },
+  {
+   "index": 109,
+   "key": "config:wuwa.max_chars",
+   "label": "汇总最多输出（字）",
+   "hint": "全角色汇总太长就截断，群里发一大坨没人看。",
+   "kind": "int",
+   "wire": "int",
+   "options": null,
+   "on": null,
+   "off": null,
+   "page": "api"
   }
  ],
  "pages": [
@@ -1921,11 +2011,63 @@
     },
     {
      "t": "group",
-     "title": "（占位）下一个 API",
+     "title": "鸣潮账号查询（wuthering-waves-platform）",
      "items": [
       {
        "t": "note",
-       "text": "这个框是**占位**的，里面没有配置项。\n\n以后加天气、翻译、图片生成、外部搜索之类，就复制一个 group：\n\n1. `config.yaml` 里加一段配置\n2. `src/` 里实现（要能单独测试，别和模型耦合）\n3. `ui/schema.json` 这一页加一个 group，把字段下标填进去\n\n界面本身不用改 —— 加不加这个框、框里放什么，全在 schema 里。\n\n一个 group 长这样：\n`{\"t\":\"group\",\"title\":\"…\",\"items\":[…]}`"
+       "text": "**这条跟上面那个 Enka 不是一回事，先看这段。**\n\n上面查的是任何人 UID 的**公开展柜**，所以群友 @ 一下就能用；\n鸣潮这条查的是**你自己登录后的库街区账号**（角色练度、声骸、武器、共鸣链），**只能查自己，没有「查别人」这回事**。\n所以它是一条**控制指令**（要授权 + 口令），默认也不给群友用。"
+      },
+      {
+       "t": "field",
+       "index": 103
+      },
+      {
+       "t": "field",
+       "index": 104
+      },
+      {
+       "t": "head",
+       "text": "登录（必须先做）"
+      },
+      {
+       "t": "note",
+       "text": "数据来自 [yangfeng20/wuthering-waves-platform](https://github.com/yangfeng20/wuthering-waves-platform) 的 MCP 服务，需要 **Node.js 22+**。\n\n用之前要在电脑上**登录一次**（要手机号收短信，只能你自己做）：\n```\nnpx -y --package wuthering-waves-platform wuthering-waves-platform login\n```\n凭据存在 `%USERPROFILE%\\.waves-platform\\credentials.json`。\n\n⚠ **库街区的 Token 和设备标识 did 是绑定的**：别在库街区 App、别的插件和这里反复登录同一个账号 —— 后登录的会让先前的会话失效。\n\n如果接口返回空数据，去库街区 App 的「数据终端」里打开对应数据的**对外展示开关**（角色面板、声骸、探索、挑战是分开的）。"
+      },
+      {
+       "t": "field",
+       "index": 105
+      },
+      {
+       "t": "head",
+       "text": "频率与缓存"
+      },
+      {
+       "t": "note",
+       "text": "每次查询都要起一个 node 进程（npx 冷启动实测 12 秒，之后 2~3 秒），所以超时给得比较宽、并且带一层短缓存。\n缓存文件在 `data\\wuwa_cache.json`，删掉没有副作用。"
+      },
+      {
+       "t": "field",
+       "index": 106
+      },
+      {
+       "t": "field",
+       "index": 107
+      },
+      {
+       "t": "head",
+       "text": "多账号与输出"
+      },
+      {
+       "t": "field",
+       "index": 108
+      },
+      {
+       "t": "field",
+       "index": 109
+      },
+      {
+       "t": "note",
+       "text": "群里的写法：`\\鸣潮 [角色名]`；私聊简写：`/鸣潮 [角色名]`。\n不带角色名 = 全角色练度汇总。角色名支持子串匹配（打「维里奈」或「里奈」都行）。"
       }
      ]
     }

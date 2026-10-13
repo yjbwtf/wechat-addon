@@ -491,3 +491,32 @@ enka:
     by_character: []
     #   - 胡桃 | 暴击率 暴击伤害 生命值% 0.8
 
+# --------------------------------------------------------------------------
+# 鸣潮账号查询：\鸣潮 [角色名]（私聊简写是 /鸣潮 [角色名]）
+#
+# **跟上面那个 enka 不是一回事。**
+#   · enka 查的是任何人 UID 的**公开展柜**，所以它是「公开指令」；
+#   · 这条查的是**你自己登录后的库街区账号**（角色练度/声骸/体力），
+#     只能查自己，所以它是**控制指令**：要授权 + 口令。
+#
+# 数据来自 wuthering-waves-platform 的 MCP 服务（需要 Node.js 22+）：
+#   https://github.com/yangfeng20/wuthering-waves-platform
+# 用之前**必须先登录一次**（要用手机号收短信，只能你自己做）：
+#     npx -y --package wuthering-waves-platform wuthering-waves-platform login
+# 凭据存在 ~/.waves-platform/credentials.json
+#
+# 注意：库街区的 Token 和 did 是绑定的。别在库街区 App、别的插件和这里
+# 反复登录同一个账号 —— 后登录的会让先前的会话失效。
+# --------------------------------------------------------------------------
+wuwa:
+  enabled: true
+  words: ["鸣潮", "wuwa", "waves"]
+  # 启动 MCP 服务的命令。想固定版本或用本地检出的目录就改这里
+  # （比如 ["node", "D:/wuwa/src/mcp/server.js"]）。
+  command: ["npx", "-y", "--package", "wuthering-waves-platform",
+            "wuthering-waves-platform-mcp"]
+  timeout_seconds: 120       # npx 第一次要下包（冷启动实测 12 秒），别给 20
+  cache_seconds: 60          # 结果缓存；每次查询要起一个 node 进程
+  default_account: ''        # 多账号时指定用哪个，留空用当前激活的
+  max_chars: 1200            # 全角色汇总最多输出多少字
+
