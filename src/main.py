@@ -654,7 +654,7 @@ class Bot:
             logging.error("打开 %s 失败：%s", url, exc)
             return False
 
-    def handle_public_command(self, msg: IncomingMessage, body: str) -> None:
+    def handle_public_command(self, msg: IncomingMessage, body: str) -> bool:
         """群友也能用的公开指令（当前只有 `/查询`）。
 
         **刻意不走授权和口令** —— 群友不知道口令，而查的是本来就公开的展柜数据。
@@ -666,30 +666,44 @@ class Bot:
           3. **暂停/急停期间不回复**。急停的语义是「什么都不发」，
              公开指令也是回复，不该例外。
 
-        不认识的其他 `/xxx` 一律静默忽略 —— 免得这里变成一个开放聊天入口。
+        返回值：True = 这条消息已经处理掉了；False = **它不是公开指令，
+        请调用方继续走控制指令那条路**。
         """
+        # 先判指令词认不认，**这一步不能吞掉消息**。
+        #
+        # 为什么：私聊用的「私聊简写前缀」就是 `/`，跟公开指令前缀是**同一个
+        # 符号**。用户在私聊发 `/截图`，如果这里直接 return，下面那条控制指令
+        # 的路就永远轮不到 —— 现象是「私聊的截图指令被识别成公开指令、
+        # 然后不匹配、完全没反应」。（用户实际报的就是这个）
+        if self.gate.strict_command_kind(
+                body, {"enka": self.cfg.enka.words}) != "enka":
+            # 但也不能无条件交出去：群里的 `/随便乱写` 必须继续静默忽略，
+            # 否则这里就成了一个开放的聊天入口。
+            # 只有「它确实可能是一条控制指令」时才交 —— 也就是
+            # as_command 认得出前缀（群前缀在群里、简写前缀在可信会话）。
+            trusted = self.gate.is_trusted_chat(msg.group)
+            if self.gate.as_command(msg.content, trusted=trusted) is not None:
+                logging.info("不是公开指令，交给控制指令那条路：[%s] %s -> %r",
+                             msg.group, msg.sender, body[:30])
+                return False
+            logging.info("不认识的公开指令，忽略：[%s] %s -> %r",
+                         msg.group, msg.sender, body[:30])
+            return True
         ok, reason = self.gate.prefilter(msg.group, msg.msg_key, is_bot=msg.is_bot)
         if not ok:
             logging.debug("公开指令丢弃 [%s/%s]：%s", msg.group, msg.sender, reason)
-            return
+            return True
         if self.paused or self.stop.stopped:
             logging.info("已暂停，公开指令不回复：[%s] %s", msg.group, msg.sender)
-            return
-        # 用**严格**匹配，不用 classify_command 的模糊匹配：
-        # 那几级（包含 / 子序列）是给授权者打错字用的，公开指令面向全群，
-        # 宽匹配会把「/不是查询」也变成入口。
-        if self.gate.strict_command_kind(
-                body, {"enka": self.cfg.enka.words}) != "enka":
-            logging.info("不认识的公开指令，忽略：[%s] %s -> %r",
-                         msg.group, msg.sender, body[:30])
-            return
+            return True
         # 公开指令要算进每群每小时上限（否则群友可以拿它刷屏）
         allowed, why = self.gate.limiter.check(msg.group)
         if not allowed:
             logging.info("公开指令被限流：[%s] %s", msg.group, why)
-            return
+            return True
         self.gate.limiter.commit(msg.group)
         self.handle_enka(msg, body, public=True)
+        return True
 
     def handle_enka(self, msg: IncomingMessage, body: str,
                     emit=None, *, public: bool = False) -> None:
@@ -910,9 +924,11 @@ class Bot:
         if not msg.is_bot:
             # 公开指令优先：它用的是另一套前缀（`/`），且**不走授权和口令** ——
             # 群友也能查，见 Gatekeeper.public_command 的说明。
+            #
+            # 但**只有真的被它处理掉才 return**：私聊的简写前缀也是 `/`，
+            # 私聊发 `/截图` 时它不是公开指令，得让下面控制指令那条路接住。
             pub = self.gate.public_command(msg.group, msg.content)
-            if pub is not None:
-                self.handle_public_command(msg, pub)
+            if pub is not None and self.handle_public_command(msg, pub):
                 return
 
             trusted = self.gate.is_trusted_chat(msg.group)

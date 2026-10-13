@@ -92,33 +92,45 @@ def analyze(text: str, cfg, group: str, sender: str = "路人") -> dict:
     if body is not None:
         kind = gate.strict_command_kind(body, {"enka": cfg.enka.words})
         step("公开指令前缀 %r" % cfg.enka.prefix, "命中，正文 = %r" % body)
-        step("指令词严格匹配", "类别 = %s" % (kind or "认不出（会被静默忽略）"))
-        if kind != "enka":
+        step("指令词严格匹配", "类别 = %s" % (kind or "认不出"))
+        if kind == "enka":
+            if not in_whitelist:
+                step("白名单", "公开指令**必须**在白名单群里，这条会被丢弃")
+                out["kind"] = "blocked"
+                out["detail"]["reason"] = "公开指令 + 不在白名单"
+                return out
+            out["kind"] = "enka"
+            _fill_enka(out, step, cfg, body, public=True, trusted=trusted,
+                       gate=gate)
+            return out
+        # 前缀命中了但指令词不是公开指令。
+        #
+        # **这里不能直接判成「忽略」** —— 私聊的简写前缀就是 `/`，跟公开指令
+        # 前缀是同一个符号。用户在私聊发 `/截图`，机器人得让下面那条控制指令
+        # 的路接住它（实测踩过：私聊截图指令完全没反应）。
+        # 群里则不同：群里的 `/随便乱写` 必须继续静默（否则成了开放聊天入口），
+        # 而群里的控制指令用的是另一个前缀，as_command 认不出来。
+        if gate.as_command(text, trusted=trusted) is not None:
+            step("公开指令", "认不出这个词，**交给控制指令那条路**（私聊的 "
+                 "简写前缀和公开指令前缀是同一个符号）")
+        else:
             out["kind"] = "ignored"
             out["detail"]["reason"] = "公开指令前缀命中了，但指令词不认"
             _hint_control(out, step, cfg, gate, body)
             return out
-        if not in_whitelist:
-            step("白名单", "公开指令**必须**在白名单群里，这条会被丢弃")
-            out["kind"] = "blocked"
-            out["detail"]["reason"] = "公开指令 + 不在白名单"
-            return out
-        out["kind"] = "enka"
-        _fill_enka(out, step, cfg, body, public=True, trusted=trusted, gate=gate)
-        return out
-
-    # 为什么没走公开指令 —— 把它说清楚，省得用户猜
-    if not cfg.enka.enabled:
-        step("公开指令", "没走 —— 账号查询功能是关的")
-    elif not cfg.enka.allow_group_members:
-        step("公开指令", "没走 —— 「允许群友查询」是关的")
-    elif not mentioned and cfg.require_at and not trusted:
-        step("公开指令", "没走 —— 没 @ 机器人（require_at 开着）")
-    elif not (cleaned or "").lstrip().startswith(cfg.enka.prefix or "/"):
-        step("公开指令", "没走 —— 去掉 @ 之后不是以 %r 开头"
-             % (cfg.enka.prefix or "/"))
     else:
-        step("公开指令", "没走")
+        # 为什么没走公开指令 —— 把它说清楚，省得用户猜
+        if not cfg.enka.enabled:
+            step("公开指令", "没走 —— 账号查询功能是关的")
+        elif not cfg.enka.allow_group_members:
+            step("公开指令", "没走 —— 「允许群友查询」是关的")
+        elif not mentioned and cfg.require_at and not trusted:
+            step("公开指令", "没走 —— 没 @ 机器人（require_at 开着）")
+        elif not (cleaned or "").lstrip().startswith(cfg.enka.prefix or "/"):
+            step("公开指令", "没走 —— 去掉 @ 之后不是以 %r 开头"
+                 % (cfg.enka.prefix or "/"))
+        else:
+            step("公开指令", "没走")
 
     # ---- 2) 控制指令（要授权 + 口令，**但不要白名单**）-------------------
     ctl = gate.as_command(text, trusted=trusted)

@@ -161,6 +161,53 @@ try:
 finally:
     enka.query = _real_query
 
+# ---------------------------------------------------------------- 分流
+# 「公开指令前缀命中了、但指令词不是公开指令」时，消息到底归谁。
+#
+# 用户报的 bug：私聊发 `/截图`，被当成公开指令吞掉，控制指令那条路永远轮不到。
+# 根因是私聊的**简写前缀就是 `/`**，跟公开指令前缀是同一个符号。
+#
+# 这里同时验两边：脚本的判定（analyze）和机器人的返回值
+# （handle_public_command 的 True/False），它们必须一致 ——
+# 否则「脚本说会怎样」又和实际分开了。
+print()
+print("公开指令前缀命中但词不认时，归谁（脚本 vs 机器人）")
+print()
+ROUTE_CASES = [
+    # (文本, 群, 期望 kind, 期望 handle_public_command 返回)
+    ("/截图", PRIVATE, "control:shot", False),
+    ("/agent 看看README", PRIVATE, "control:agent", False),
+    ("/刷课", PRIVATE, "control:brush", False),
+    ("/查询 137602053", PRIVATE, "enka", True),
+    ("@%s /截图" % BOT, GROUP, IGNORED, True),
+    ("@%s /随便乱写" % BOT, GROUP, IGNORED, True),
+    ("@%s /查询 137602053" % BOT, GROUP, EC, True),
+]
+for text, group, want_kind, want_consumed in ROUTE_CASES:
+    res = check_command.analyze(text, cfg, group)
+    short = "%s | %s" % (group[:4], text.replace(BOT, "机器人"))
+    check("%-38s 判定 = %s" % (short, want_kind),
+          res["kind"] == want_kind, "得到 %s" % res["kind"])
+
+    # 真跑一遍机器人的返回值
+    gate = Gatekeeper(cfg)
+    pub = gate.public_command(group, text)
+    if pub is None:
+        check("  └ 压根没进公开指令这条路", want_consumed is True,
+              "public_command 返回 None")
+        continue
+    seen.clear()
+    consumed = main.Bot.handle_public_command(
+        FakeBot(), IncomingMessage(group=group, sender="主人", content=text,
+                                   msg_key=text), pub)
+    check("  └ 机器人：吃掉=%s" % want_consumed, consumed == want_consumed,
+          "得到 %s" % consumed)
+    # 两边一致的不变式：**只要脚本判成「交给控制指令那条路」（control:*），
+    # 机器人就必须没吃掉**；其余情况（公开指令 / 静默忽略 / 被拦）都该吃掉。
+    check("  └ **脚本和机器人一致**",
+          consumed == (not res["kind"].startswith("control:")),
+          "脚本 kind=%s / 机器人 consumed=%s" % (res["kind"], consumed))
+
 # 私有会话：免 @、免口令
 if PRIVATE:
     print()
