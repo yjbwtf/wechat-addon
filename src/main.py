@@ -868,16 +868,19 @@ class Bot:
         try:
             if action == "login":
                 if not key:
+                    # 认不出是谁就不能开始 —— 账号最终要按他的身份归属，
+                    # 拿群昵称当钥匙等于谁都能翻别人的号。
                     emit(msg.group, wuwa.NO_IDENTITY, split=False)
                     return
-                ok, mobile = wuwa.start_login(self.wuwa_login, key,
-                                              payload, who)
+                ok, mobile = wuwa.start_login(
+                    self.wuwa_login, key, payload, who,
+                    group=msg.group, sender=msg.sender)
                 if not ok:
                     emit(msg.group, mobile, split=False)
                     return
-                logging.warning("鸣潮登录开始：[%s] %s 手机=%s",
+                logging.warning("鸣潮登录开始：[%s] %s 手机=%s（key=%s）",
                                 msg.group, msg.sender,
-                                wuwa.mask_mobile(mobile))
+                                wuwa.mask_mobile(mobile), key or "(还没认出身份)")
                 # **@ 这个群友** —— 让他知道在等他，也免得别人以为在问自己
                 emit(msg.group, wuwa.LOGIN_START % (
                     wuwa.mask_mobile(mobile),
@@ -885,10 +888,9 @@ class Bot:
                     split=False, at=[msg.sender])
                 return
             if action == "code":
-                if not key:
-                    emit(msg.group, wuwa.NO_IDENTITY, split=False)
-                    return
-                ok, text = wuwa.finish_login(cfg, self.wuwa_login, key, payload)
+                ok, text = wuwa.finish_login(
+                    cfg, self.wuwa_login, key, payload,
+                    group=msg.group, sender=msg.sender)
                 logging.warning("鸣潮登录 [%s] %s | %s",
                                 msg.group, msg.sender, "成功" if ok else "失败")
                 emit(msg.group, text, split=False)
@@ -898,6 +900,10 @@ class Bot:
                     emit(msg.group, wuwa.NO_IDENTITY, split=False)
                     return
                 ok, text = wuwa.remove_account(cfg, self.wuwa_cache, key)
+                emit(msg.group, text, split=False)
+                return
+            if action == "diagnose":
+                ok, text = wuwa.diagnose(cfg, self.wuwa_cache, key)
                 emit(msg.group, text, split=False)
                 return
             if action == "list":

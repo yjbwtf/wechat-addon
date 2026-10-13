@@ -55,6 +55,7 @@ SWITCH_WORDS = ("切换", "切到", "换", "switch", "use")
 LOGIN_WORDS = ("登录", "login", "绑定")
 CODE_WORDS = ("验证码", "code")
 LOGOUT_WORDS = ("注销", "退出登录", "logout")
+DIAG_WORDS = ("诊断", "diagnose", "自查")
 
 #: 登录流程多久没走完就作废（秒）。验证码本身也就几分钟有效。
 LOGIN_TTL = 600
@@ -275,75 +276,192 @@ def has_account(cfg, cache: Cache | None, key: str) -> bool:
                for a in items)
 
 
-def start_login(cache: Cache | None, key: str, mobile: str, label: str
-                ) -> tuple[bool, str]:
+def start_login(cache: Cache | None, key: str, mobile: str, label: str,
+                *, group: str = "", sender: str = "") -> tuple[bool, str]:
     """记下「某人正在登录」，等他回验证码。
 
     平台没有「发验证码」这个接口（`loginBySms` 要手机号和验证码一起给），
     所以这里只能先把手机号存着，等用户自己去 App 里点发送。
+
+    **两份都存**：一份按 (群, 发送者)，一份按身份 key。
+
+    为什么必须这样：身份解析**不稳定**（`resolve_identity` 自己就写了
+    「有时给得出微信号，有时只给 display_name」）。实测踩过：第一步只拿到
+    昵称（key=nick-xxx），第二步拿到微信号（key=wx-yyy）—— 两步对不上，
+    机器人回「没有正在进行的登录」，用户完全看不懂。
+    (群, 发送者) 是稳定的，所以拿它当兜底。
     """
     digits = "".join(ch for ch in str(mobile or "") if ch.isdigit())
     if not (6 <= len(digits) <= 15):
         return False, "手机号看着不对：%r。用法：「鸣潮 登录 13800138000」" % mobile
     if cache is not None:
-        cache.put("login:" + key,
-                  json.dumps({"mobile": digits, "label": label,
-                              "at": time.time()}, ensure_ascii=False))
+        blob = json.dumps({"mobile": digits, "label": label,
+                           "key": key, "at": time.time()},
+                          ensure_ascii=False)
+        for k in login_keys(key, group, sender):
+            cache.put(k, blob)
     return True, digits
 
 
-def pending_mobile(cache: Cache | None, key: str) -> tuple[str, str]:
-    """取回「正在登录」的手机号。返回 (手机号, 显示名)，没在进行中就是空。"""
+def login_keys(key: str, group: str = "", sender: str = "") -> list[str]:
+    """一次登录可以落在哪些 key 上（按优先级）。"""
+    out = []
+    if group and sender:
+        out.append("login:%s|%s" % (group, sender))
+    if key:
+        out.append("login:" + key)
+    return out
+
+
+def pending_login(cache: Cache | None, key: str, *, group: str = "",
+                  sender: str = "") -> dict:
+    """取回「正在登录」的那条记录（手机号 / 显示名 / 最终归属的 key）。"""
     if cache is None:
-        return "", ""
-    raw = cache.get("login:" + key, LOGIN_TTL)
-    if not raw:
-        return "", ""
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        return "", ""
+        return {}
+    for k in login_keys(key, group, sender):
+        raw = cache.get(k, LOGIN_TTL)
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(data, dict) and data.get("mobile"):
+            return data
+    return {}
+
+
+def pending_mobile(cache: Cache | None, key: str, *, group: str = "",
+                   sender: str = "") -> tuple[str, str]:
+    """取回「正在登录」的手机号。返回 (手机号, 显示名)，没在进行中就是空。"""
+    data = pending_login(cache, key, group=group, sender=sender)
     return str(data.get("mobile") or ""), str(data.get("label") or "")
 
 
-def finish_login(cfg, cache: Cache | None, key: str, code: str
-                 ) -> tuple[bool, str]:
+def _clear_login(cache: Cache | None, key: str, *, group: str = "",
+                 sender: str = "") -> None:
+    if cache is None:
+        return
+    for k in login_keys(key, group, sender):
+        cache.entries.pop(k, None)
+    cache.save()
+
+
+#: 平台登录时卡在「库街区没有可读数据」这个错误上时，给的**可操作**提示。
+#: 平台 `finishLogin` 会拿 token 去 `getGameData` 补 userId/serverId/roleId，
+#: 拿不到就直接抛错、**凭据不会落盘** —— 所以这不是「验证码错」。
+NO_ROLE_DATA = (
+    "验证码是对的（平台已经过了登录这一步），但它随后要读你的鸣潮角色数据、"
+    "读不到，所以没存下凭据。\n"
+    "去库街区 App：进「鸣潮」→ 确认**角色已绑定**，"
+    "并在「数据终端」里把对应数据的**对外展示开关**打开"
+    "（角色面板、声骸、探索、挑战是分开的）。\n"
+    "弄好之后再发一次「%s登录 <手机号>」。"
+)
+
+
+def finish_login(cfg, cache: Cache | None, key: str, code: str,
+                 *, group: str = "", sender: str = "") -> tuple[bool, str]:
     """拿手机号 + 验证码去登录，登录成功后账号归到 key 名下。"""
-    mobile, label = pending_mobile(cache, key)
+    pend = pending_login(cache, key, group=group, sender=sender)
+    mobile = str(pend.get("mobile") or "")
     if not mobile:
         return False, ("没有正在进行的登录。先发「鸣潮 登录 <手机号>」，"
                        "再去库街区 App 拿验证码。")
+    label = str(pend.get("label") or "")
+    # 归属的 key：优先用**这一步**解析出来的身份 key（更准），
+    # 没有就用第一步存下来的那个。
+    own = key or str(pend.get("key") or "")
+    if not own:
+        # 认不出是谁，就**不能**把账号落到某个 key 上 ——
+        # 否则以后谁把昵称改成他的就能查。待登录状态留着，他还能重试。
+        return False, NO_IDENTITY
     code = "".join(ch for ch in str(code or "") if ch.isdigit())
     if not (4 <= len(code) <= 8):
         return False, "验证码看着不对（应该是 6 位数字）。"
     try:
         acc = call_tool(cfg, "waves_account_login_sms", {
             "mobile": mobile, "code": code,
-            "accountId": key, "label": label or key,
+            "accountId": own, "label": label or own,
         })
     except McpError as exc:
         msg = str(exc)
         log.warning("鸣潮登录失败：%s", msg)
-        # 验证码错 / 过期是最常见的，把它翻成人话
-        if any(w in msg for w in ("验证码", "code", "失效", "过期", "错误")):
-            return False, ("登录失败：验证码不对或已过期。重新发一次"
-                           "「鸣潮 登录 %s」，再去 App 拿新码。"
-                           % mask_mobile(mobile))
-        return False, "登录失败：%s" % msg[:300]
+        # **别再用 'code' 这种子串判断**：平台返回的错误体里永远有
+        # `"code": ...` 字段，用它会把所有失败都说成「验证码错」——
+        # 实测踩过：真因是「库街区没绑定角色」，却回了一句「验证码不对」。
+        if CODE_WRONG_MARKS[0] in msg or CODE_WRONG_MARKS[1] in msg:
+            return False, ("验证码不对或已过期。重新发一次「鸣潮 登录 %s」，"
+                           "再去 App 拿新码。" % mask_mobile(mobile))
+        if any(w in msg for w in NO_ROLE_MARKS):
+            return False, NO_ROLE_DATA % "鸣潮"
+        # 认不出来就**把平台的原话给出来** —— 猜错比不给更坏
+        return False, "登录失败（平台原话）：%s" % _squash(msg)
     except Exception as exc:  # noqa: BLE001
         log.warning("鸣潮登录异常：%r", exc)
         return False, "登录出错：%s" % exc
 
+    _clear_login(cache, key, group=group, sender=sender)
     if cache is not None:
-        cache.entries.pop("login:" + key, None)      # 用掉了
         cache.entries.pop("wuwa:accounts", None)     # 账号列表变了
         cache.save()
     name = ""
     if isinstance(acc, dict):
         name = str(acc.get("label") or acc.get("id") or "")
-    log.warning("鸣潮登录成功：key=%s 手机=%s", key[:12], mask_mobile(mobile))
+    log.warning("鸣潮登录成功：key=%s 手机=%s", own[:14], mask_mobile(mobile))
     return True, ("登录成功%s。现在可以直接发「鸣潮」或「鸣潮 角色名」查你自己的号了。"
                   % (("：" + name) if name else ""))
+
+
+#: 只有这两个**明确**的标记才算「验证码不对」。
+#: 绝对不要用 "code" 这种词 —— 错误体里永远有它。
+CODE_WRONG_MARKS = ("验证码错误", "验证码已失效")
+
+#: 平台登录卡在「库街区没有可读数据」时的特征
+NO_ROLE_MARKS = ("暂无数据", "绑定角色", "6001")
+
+
+def _squash(text: str, limit: int = 240) -> str:
+    """把平台返回的那坨 JSON 压成一行，方便塞进聊天消息。"""
+    s = " ".join(str(text or "").split())
+    return s[:limit] + ("…" if len(s) > limit else "")
+
+
+def diagnose(cfg, cache: Cache | None, key: str) -> tuple[bool, str]:
+    """`鸣潮 诊断`：把平台的账号自检结果摊开。
+
+    登录失败时最有用 —— 它查的是 Token / did / **角色绑定** / 各接口状态，
+    正好覆盖「登录过了但读不到数据」那类问题（`waves_account_login_sms`
+    要求账号在库街区有可读的角色数据，否则它拿不到 serverId/roleId）。
+    """
+    try:
+        data = call_tool(cfg, "waves_account_diagnose",
+                         {"accountId": key} if key else {})
+    except McpError as exc:
+        msg = str(exc)
+        if CREDENTIAL_ERROR in msg or "没有找到账号凭据" in msg:
+            return False, NOT_LOGGED_IN
+        return False, "诊断失败：%s" % _squash(msg)
+
+    lines = ["鸣潮 · 账号自检"]
+    if not isinstance(data, dict):
+        lines.append(_squash(str(data), 800))
+        return True, "\n".join(lines)
+
+    for key_name, value in data.items():
+        if key_name in ("raw", "rawRoleData"):
+            continue
+        if isinstance(value, dict):
+            lines.append("%s：" % key_name)
+            for k2, v2 in value.items():
+                lines.append("  %s = %s" % (k2, _squash(str(v2), 120)))
+        elif isinstance(value, list):
+            lines.append("%s：%s" % (key_name,
+                                    "、".join(_squash(str(x), 60)
+                                              for x in value[:8])))
+        else:
+            lines.append("%s = %s" % (key_name, _squash(str(value), 200)))
+    return True, "\n".join(lines)[:1800]
 
 
 def remove_account(cfg, cache: Cache | None, key: str) -> tuple[bool, str]:
@@ -601,6 +719,8 @@ def parse_request(text: str) -> tuple[str, str, int | None]:
         return "code", code, index
     if head_low in [w.lower() for w in LOGOUT_WORDS]:
         return "logout", "", index
+    if head_low in [w.lower() for w in DIAG_WORDS]:
+        return "diagnose", "", index
     return "query", s, index
 
 

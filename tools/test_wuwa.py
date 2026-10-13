@@ -581,6 +581,77 @@ try:
           str(wuwa.pending_mobile(lstore, k1)))
 
     print()
+    print("  登录失败的三种情形要分清楚（踩过的坑：全都报成「验证码错」）")
+    # 真实事件：用户交了一个 10 秒前拿到的验证码，机器人回「验证码不对或已过期」，
+    # 而平台的原话是「获取日常数据失败: 暂无数据, 请漂泊者绑定角色后查看」。
+    # 根因：错误体里永远有 "code" 字段，我拿它当「验证码错」的标志。
+    REAL_API_ERROR = (
+        '{\n  "code": "API_ERROR",\n'
+        '  "message": "获取日常数据失败: -暂无数据-\\n请漂泊者绑定角色后查看。",\n'
+        '  "details": {"operation": "获取日常数据", "code": 6001}\n}')
+
+    def stub_no_role(cfg, tool, args=None, timeout=0):
+        raise McpError(REAL_API_ERROR)
+
+    wuwa.call_tool = stub_no_role
+    lstore2 = wuwa.Cache(TMP / "login2.json")
+    wuwa.start_login(lstore2, k1, "13800138000", "小明")
+    ok, text = wuwa.finish_login(Cfg(), lstore2, k1, "123456")
+    check("**「库街区没绑定角色」不能报成「验证码错」**",
+          (not ok) and "验证码不对" not in text and "验证码错" not in text, text)
+    check("要说清验证码其实是对的",
+          "验证码是对的" in text, text)
+    check("要说清真正的原因（绑定角色 / 数据展示开关）",
+          "绑定" in text and "展示开关" in text, text)
+    check("而且是可操作的（告诉他弄好后再发一次）",
+          "登录 <手机号>" in text, text)
+
+    def stub_code_wrong(cfg, tool, args=None, timeout=0):
+        raise McpError('{"code": "CODE_ERROR", "message": "验证码错误"}')
+
+    wuwa.call_tool = stub_code_wrong
+    lstore3 = wuwa.Cache(TMP / "login3.json")
+    wuwa.start_login(lstore3, k1, "13800138000", "小明")
+    ok, text = wuwa.finish_login(Cfg(), lstore3, k1, "999999")
+    check("真的验证码错时才说验证码错",
+          (not ok) and "验证码" in text and "重新发一次" in text, text)
+
+    def stub_weird(cfg, tool, args=None, timeout=0):
+        raise McpError('{"code": "WEIRD", "message": "火星文错误"}')
+
+    wuwa.call_tool = stub_weird
+    lstore4 = wuwa.Cache(TMP / "login4.json")
+    wuwa.start_login(lstore4, k1, "13800138000", "小明")
+    ok, text = wuwa.finish_login(Cfg(), lstore4, k1, "123456")
+    check("**认不出来就把平台原话给出来**（猜错比不给更坏）",
+          (not ok) and "火星文错误" in text, text)
+
+    print()
+    print("  身份解析不稳定时，两步也要能接上（另一个真实踩到的坑）")
+    # 实测：第一步只拿到群昵称（key=nick-xxx），第二步拿到微信号（key=wx-yyy），
+    # 两步 key 不同 -> 回「没有正在进行的登录」，用户完全看不懂。
+    lstore5 = wuwa.Cache(TMP / "login5.json")
+    wuwa.call_tool = stub_login
+    wuwa.start_login(lstore5, "nick-aaa", "13800138000", "小明",
+                     group="G1", sender="群友甲")
+    ok, text = wuwa.finish_login(Cfg(), lstore5, "wx-bbb", "123456",
+                                 group="G1", sender="群友甲")
+    check("**第一步用昵称 key、第二步用微信号 key，仍然接得上**", ok, text)
+    check("账号归到**这一步**解析出来的 key（更准的那个）",
+          isinstance(login_calls[-1][1], dict)
+          and login_calls[-1][1].get("accountId") == "wx-bbb",
+          str(login_calls[-1]))
+    ok, text = wuwa.finish_login(Cfg(), lstore5, "wx-bbb", "123456",
+                                 group="G1", sender="群友甲")
+    check("用完之后两份都清掉了（不会重复登录）",
+          (not ok) and "没有正在进行的登录" in text, text)
+    ok, _ = wuwa.finish_login(Cfg(), lstore5, "wx-bbb", "123456",
+                              group="G2", sender="群友甲")
+    check("**别的群不会误用这个待登录状态**",
+          (not ok) and "没有正在进行的登录" in _, _)
+
+    wuwa.call_tool = stub_login
+    print()
     print("  有没有登录过")
     c12 = wuwa.Cache(TMP / "c12.json")
     check("k1 已登录", wuwa.has_account(Cfg(), c12, k1))
@@ -619,8 +690,11 @@ class StubStop:
 
 
 class FakeBot:
-    def __init__(self) -> None:
+    def __init__(self, allow_nickname: bool = False) -> None:
         self.cfg = load_config(ROOT / "config.yaml")
+        # **固定住**，别跟着本机 config.yaml 走 —— 否则用户一改设置，
+        # 这两条断言就会莫名其妙地变红（真踩过）。
+        self.cfg.wuwa.allow_nickname_identity = allow_nickname
         self.gate = Gatekeeper(self.cfg)
         self.paused = False
         self.stop = StubStop()
@@ -661,6 +735,16 @@ try:
           sent and "拿不到你的微信号" in sent[0]["text"], str(sent)[:120])
     check("而且不 @（没必要惊动他）", sent and sent[0]["at"] is None,
           str(sent)[:120])
+
+    # 把开关打开时（用户在本机就是这么设的）才允许退回昵称
+    sent.clear()
+    FB2 = FakeBot(allow_nickname=True)
+    m4 = IncomingMessage(group=group, sender="路人甲", content="鸣潮 登录 13900000002",
+                         msg_key="m4")
+    m4.identity = {}
+    FB2.handle_wuwa(m4, "鸣潮 登录 13900000002")
+    check("**显式打开 allow_nickname_identity 后允许**（这是用户的选择）",
+          sent and "手机号收到" in sent[0]["text"], str(sent)[:120])
 
     sent.clear()
     m3 = IncomingMessage(group=group, sender="小明", content="鸣潮",
